@@ -1,4 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
+
+import React, { useRef, useState, useEffect } from 'react';
 import { Download, Play, Pause, RefreshCw } from 'lucide-react';
 
 interface AudioPlayerProps {
@@ -7,98 +8,47 @@ interface AudioPlayerProps {
   onGenerate: () => void;
   hasText: boolean;
   speed: number;
+  isDark: boolean;
 }
 
-const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, isLoading, onGenerate, hasText, speed }) => {
+const AudioPlayer: React.FC<AudioPlayerProps> = ({ audioUrl, isLoading, onGenerate, hasText, speed, isDark }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
     if (audioUrl && audioRef.current) {
-      audioRef.current.src = audioUrl;
-      // Ensure speed is applied when new audio is loaded
       audioRef.current.playbackRate = speed;
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      audioRef.current.play().catch(() => {});
     }
-  }, [audioUrl]);
-
-  // Update playback rate dynamically if prop changes while playing
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = speed;
-    }
-  }, [speed]);
-
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const handleEnded = () => {
-    setIsPlaying(false);
-  };
-
-  const buttonBaseClass = "flex items-center justify-center gap-2 px-6 py-4 rounded-xl font-bold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95";
+  }, [audioUrl, speed]);
 
   return (
-    <div className="flex flex-col w-full mt-6 p-6 bg-slate-800/30 rounded-2xl border border-slate-700/50 backdrop-blur-sm gap-6">
-      <audio 
-        ref={audioRef} 
-        onEnded={handleEnded} 
-        onPause={() => setIsPlaying(false)}
-        onPlay={() => setIsPlaying(true)}
-        className="hidden" 
-      />
+    <div className="w-full space-y-3">
+      <audio ref={audioRef} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} className="hidden" />
+      
+      <button
+        onClick={onGenerate} disabled={isLoading || !hasText}
+        className="w-full py-4 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold tracking-[0.2em] uppercase transition-all disabled:opacity-30 active:scale-95 flex items-center justify-center gap-3"
+      >
+        {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'GENERATE MASTER'}
+      </button>
 
-      {/* Controls Row */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full">
-          {/* Generate Button */}
-          <button
-            onClick={onGenerate}
-            disabled={isLoading || !hasText}
-            className={`${buttonBaseClass} flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-900/20`}
+      {audioUrl && (
+        <div className="flex gap-2">
+          <button 
+            onClick={() => isPlaying ? audioRef.current?.pause() : audioRef.current?.play()}
+            className={`p-4 rounded-md border transition-all ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
           >
-            {isLoading ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
-                Generating Speech...
-              </>
-            ) : (
-              <>
-                <Play className="w-5 h-5 fill-current" />
-                Generate Speech
-              </>
-            )}
+            {isPlaying ? <Pause className="w-5 h-5 text-indigo-600" /> : <Play className="w-5 h-5 text-indigo-600 fill-current" />}
           </button>
-
-          {/* Play/Download Controls (Only visible if audio exists) */}
-          {audioUrl && (
-            <div className="flex flex-col sm:flex-row items-stretch gap-3 w-full sm:w-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <button
-                onClick={togglePlay}
-                className="flex items-center justify-center p-4 rounded-xl bg-slate-700 text-slate-200 hover:bg-slate-600 hover:text-white transition-colors min-w-[60px]"
-                title={isPlaying ? "Pause" : "Replay"}
-              >
-                 {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current" />}
-              </button>
-              
-              <a
-                href={audioUrl}
-                download="gemini-speech.wav"
-                className={`${buttonBaseClass} bg-slate-700 text-slate-200 hover:bg-slate-600 hover:text-white border border-slate-600`}
-              >
-                <Download className="w-5 h-5" />
-                Download WAV
-              </a>
-            </div>
-          )}
-      </div>
+          <a 
+            href={audioUrl} download="voice-master.wav"
+            className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-md border text-[10px] font-bold uppercase tracking-widest transition-all ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}
+          >
+            <Download className="w-4 h-4" /> Download WAV
+          </a>
+        </div>
+      )}
     </div>
   );
 };

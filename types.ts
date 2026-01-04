@@ -1,3 +1,4 @@
+
 export enum VoiceName {
   Puck = 'Puck',
   Charon = 'Charon',
@@ -5,6 +6,10 @@ export enum VoiceName {
   Fenrir = 'Fenrir',
   Zephyr = 'Zephyr',
 }
+
+export type PersonaType = 'neutral' | 'african' | 'nigerian' | 'british' | 'american' | 'storyteller' | 'corporate';
+
+export type ModeType = 'light' | 'dark';
 
 export interface VoiceOption {
   id: VoiceName;
@@ -23,8 +28,13 @@ export const VOICE_OPTIONS: VoiceOption[] = [
 
 export interface TTSState {
   text: string;
+  previousText: string | null;
   voice: VoiceName;
+  persona: PersonaType;
   isLoading: boolean;
+  isAnalyzing: boolean;
   audioUrl: string | null;
   error: string | null;
+  previewDuration: number;
+  mode: ModeType;
 }
