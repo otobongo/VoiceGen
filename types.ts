@@ -38,3 +38,10 @@ export interface TTSState {
   previewDuration: number;
   mode: ModeType;
 }
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+}

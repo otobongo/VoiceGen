@@ -2,6 +2,20 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { VoiceName, PersonaType } from "../types";
 
+// Helper to get key from various potential sources (Vite, Process, or Direct)
+const getApiKey = (): string => {
+  // @ts-ignore - Check Vite env
+  if (import.meta.env && import.meta.env.VITE_API_KEY) {
+    // @ts-ignore
+    return import.meta.env.VITE_API_KEY;
+  }
+  // Check standard process.env
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    return process.env.API_KEY;
+  }
+  return '';
+};
+
 const PERSONA_PROMPTS: Record<PersonaType, string> = {
   neutral: "",
   african: "Speak with a warm, rhythmic African accent: ",
@@ -66,8 +80,8 @@ const preprocessText = (text: string, persona: PersonaType): string => {
   });
     
   processed = processed
-    .replace(/\[pause\]/gi, '\n\n')
-    .replace(/\[break\]/gi, '\n')
+    .replace(/\[pause\]/gi, '\n')
+    .replace(/\[break\]/gi, '\n\n')
     .replace(/\[short\]/gi, '... ')
     .replace(/\.\.\.(?!\s)/g, '... ')
     .replace(/ +/g, ' ')
@@ -78,7 +92,10 @@ const preprocessText = (text: string, persona: PersonaType): string => {
 
 export const analyzeScript = async (text: string, instructions?: string): Promise<string> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("API Key missing. Please set VITE_API_KEY.");
+    
+    const ai = new GoogleGenAI({ apiKey });
     const systemPrompt = `
       You are an expert Voice Director and Script Editor.
       TASK: ${instructions ? `Modify the script based on: "${instructions}"` : 'Refine the script for professional TTS delivery.'}
@@ -90,7 +107,7 @@ export const analyzeScript = async (text: string, instructions?: string): Promis
       
       STRICT RULES:
       1. SCOPE: Prosody tags MUST ONLY apply to the single sentence they start in.
-      2. ENDING: Add [pause][pause] at the end of EVERY paragraph.
+      2. ENDING: Add a single [pause] at the end of EVERY paragraph.
       3. FORMATTING: Separate paragraphs with exactly TWO newline characters.
       4. RETURN ONLY SCRIPT: No conversational filler.
       
@@ -108,7 +125,10 @@ export const analyzeScript = async (text: string, instructions?: string): Promis
 
 export const generateSpeech = async (text: string, voice: VoiceName, persona: PersonaType, durationLimit: number = 0): Promise<string> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("API Key missing. Please set VITE_API_KEY.");
+
+    const ai = new GoogleGenAI({ apiKey });
     let finalRawText = text;
     if (durationLimit > 0) {
       const wordCount = Math.floor(durationLimit * 2.5);

@@ -15,10 +15,11 @@ interface VoiceSelectorProps {
   previewDuration: number;
   isDark: boolean;
   onError?: (error: any) => void;
+  onPreviewComplete?: (url: string) => void;
 }
 
 const VoiceSelector: React.FC<VoiceSelectorProps> = ({ 
-  selectedVoice, onSelect, disabled, previewText, speed, persona, previewDuration, isDark, onError
+  selectedVoice, onSelect, disabled, previewText, speed, persona, previewDuration, isDark, onError, onPreviewComplete
 }) => {
   const [previewingVoice, setPreviewingVoice] = useState<VoiceName | null>(null);
   const [loadingVoice, setLoadingVoice] = useState<VoiceName | null>(null);
@@ -47,6 +48,10 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({
       await audio.play();
       audioRef.current = audio;
       setPreviewingVoice(voice.id);
+      
+      if (onPreviewComplete) {
+        onPreviewComplete(url);
+      }
     } catch (err: any) {
       console.error("Voice preview failed", err);
       if (onError) onError(err);

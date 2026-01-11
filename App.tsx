@@ -5,57 +5,85 @@ import {
   Smile, Frown, Wind, FastForward, Activity, Settings2, Loader2, Send, Clock,
   Flame, Moon, Sun, Angry, Waves, ShieldCheck, Cpu, Coffee, Briefcase, 
   Search, HelpCircle, Radio, Newspaper, Zap, Music, Sliders, Key, AlertTriangle, ExternalLink,
-  BarChart3
+  BarChart3, Info, LogOut
 } from 'lucide-react';
 import VoiceSelector from './components/VoiceSelector';
 import AudioPlayer from './components/AudioPlayer';
+import LoginScreen from './components/LoginScreen';
 import { VoiceName, TTSState, PersonaType, ModeType } from './types';
 import { generateSpeech, analyzeScript } from './services/geminiService';
 import { processGeminiAudio } from './utils/audioUtils';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
-// The window.aistudio global is assumed to be pre-configured in the environment.
-// Manual declaration is removed to avoid modifier conflicts.
-
-const App: React.FC = () => {
+// Separation of concerns: Internal App Component containing the main logic
+const VoiceStudioApp: React.FC = () => {
+  const { user, logout } = useAuth();
+  
   const [state, setState] = useState<TTSState>({
-    text: "Welcome to Voice Studio. [pause] This is your professional Nigerian persona. [pause][pause]\n\nExperience high-fidelity speech synthesis. [whisper] We handle subtle nuances with ease. [pause] Or [shout] project with power when needed! [pause][pause]\n\nUse the command bar below to direct the AI. [pause][pause]",
+    text: "Welcome to Voice Studio. [pause] This is your professional Nigerian persona. [pause]\n\nExperience high-fidelity speech synthesis. [whisper] We handle subtle nuances with ease. [pause] Or [shout] project with power when needed! [pause]\n\nUse the command bar below to direct the AI. [pause]",
     previousText: null,
-    voice: VoiceName.Kore,
+    voice: VoiceName.Fenrir,
     persona: 'nigerian',
     isLoading: false,
     isAnalyzing: false,
     audioUrl: null,
     error: null,
     previewDuration: 10,
-    mode: 'light',
+    mode: 'dark',
   });
 
   const [speed, setSpeed] = useState(1.0);
   const [directive, setDirective] = useState("");
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
+  const [isFullMaster, setIsFullMaster] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isDark = state.mode === 'dark';
 
+  // Reset states on critical changes to force a new preview
   useEffect(() => {
-    // Initial check for API key
+    setHasPreviewed(false);
+    setIsFullMaster(false);
+    setState(prev => ({ ...prev, audioUrl: null }));
+  }, [state.text, state.voice, state.persona]);
+
+  useEffect(() => {
     const checkKey = async () => {
-      try {
-        const active = await (window as any).aistudio.hasSelectedApiKey();
-        setHasApiKey(active);
-      } catch (e) {
-        setHasApiKey(false);
+      // 1. Check for Environment Variable (Production/Vercel)
+      // @ts-ignore
+      if (import.meta.env && import.meta.env.VITE_API_KEY) {
+        setHasApiKey(true);
+        return;
       }
+      
+      // 2. Check for AI Studio Bridge (Sandbox/IDX)
+      try {
+        if ((window as any).aistudio) {
+            const active = await (window as any).aistudio.hasSelectedApiKey();
+            setHasApiKey(active);
+            return;
+        }
+      } catch (e) {
+        // Fallthrough
+      }
+      
+      setHasApiKey(false);
     };
     checkKey();
   }, []);
 
   const handleOpenKeySelector = async () => {
     try {
-      await (window as any).aistudio.openSelectKey();
-      // Mitigate race condition: assume success after triggering the selection dialog
-      setHasApiKey(true);
-      setState(prev => ({ ...prev, error: null }));
+      if ((window as any).aistudio) {
+          await (window as any).aistudio.openSelectKey();
+          setHasApiKey(true);
+          setState(prev => ({ ...prev, error: null }));
+      } else {
+          // If no UI bridge exists (e.g. Vercel), we can't open a selector.
+          // In a real app, you might show a modal input here.
+          alert("To use this app in production, please configure VITE_API_KEY in your deployment settings.");
+      }
     } catch (e) {
       console.error("Failed to open key selector", e);
     }
@@ -66,7 +94,7 @@ const App: React.FC = () => {
     const msg = err?.message || "";
     if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
       setState(prev => ({ ...prev, error: "QUOTA_EXHAUSTED" }));
-    } else if (msg.includes('Requested entity was not found')) {
+    } else if (msg.includes('Requested entity was not found') || msg.includes('API Key missing')) {
       setHasApiKey(false);
       handleOpenKeySelector();
     } else {
@@ -99,6 +127,13 @@ const App: React.FC = () => {
       const base64Audio = await generateSpeech(state.text, state.voice, state.persona);
       const audioUrl = await processGeminiAudio(base64Audio);
       setState(prev => ({ ...prev, isLoading: false, audioUrl }));
+      setIsFullMaster(true);
+      
+      // Auto-download helper
+      const link = document.createElement('a');
+      link.href = audioUrl;
+      link.download = `voice-master-${state.voice}.wav`;
+      link.click();
     } catch (err: any) {
       setState(prev => ({ ...prev, isLoading: false }));
       handleError(err);
@@ -120,31 +155,30 @@ const App: React.FC = () => {
   };
 
   const palette = [
-    { id: 'Pause', tag: '[pause]', icon: PauseCircle, color: 'text-indigo-500', hint: 'Adds a natural break' },
-    { id: 'Breathe', tag: '[break]', icon: Waves, color: 'text-blue-400', hint: 'Longer structural silence' },
-    { id: 'Whisper', tag: '[whisper]', icon: Wind, color: 'text-slate-400', hint: 'Low volume, breathy air' },
-    { id: 'Shout', tag: '[shout]', icon: Volume2, color: 'text-rose-500', hint: 'High volume, intense power' },
-    { id: 'Happy', tag: '[happy]', icon: Smile, color: 'text-emerald-500', hint: 'Cheerful, upbeat inflection' },
-    { id: 'Sad', tag: '[sad]', icon: Frown, color: 'text-sky-500', hint: 'Somber, mournful tone' },
-    { id: 'Angry', tag: '[angry]', icon: Angry, color: 'text-red-600', hint: 'Stern, forceful articulation' },
-    { id: 'Pulse', tag: '[stutter]', icon: Activity, color: 'text-purple-500', hint: 'Slight rhythmic repetition' },
-    { id: 'Mystic', tag: '[mysterious]', icon: Ghost, color: 'text-indigo-400', hint: 'Low pitch, intriguing feel' },
-    { id: 'Suspense', tag: '[suspense]', icon: Music, color: 'text-orange-500', hint: 'Slower, dramatic tension' },
-    { id: 'Radio', tag: '[announcer]', icon: Radio, color: 'text-blue-600', hint: 'High-energy, compressed' },
-    { id: 'News', tag: '[news]', icon: Newspaper, color: 'text-slate-700', hint: 'Neutral reporting style' },
-    { id: 'Robot', tag: '[robotic]', icon: Cpu, color: 'text-slate-500', hint: 'Flat mechanical monotone' },
-    { id: 'Breathe', tag: '[breathy]', icon: ShieldCheck, color: 'text-teal-400', hint: 'Heavy air intake texture' },
-    { id: 'Formal', tag: '[formal]', icon: Briefcase, color: 'text-slate-800', hint: 'Precise, professional focus' },
-    { id: 'Confused', tag: '[confused]', icon: HelpCircle, color: 'text-amber-600', hint: 'Hesitant, uncertain pitch' },
-    { id: 'Energy', tag: '[energetic]', icon: Zap, color: 'text-yellow-500', hint: 'Fast-paced, high spirit' },
-    { id: 'Chill', tag: '[relaxed]', icon: Coffee, color: 'text-orange-400', hint: 'Casual, laid-back tone' },
+    { id: 'Pause', tag: '[pause]', icon: PauseCircle, color: 'text-indigo-500', hint: 'Inserts a slight natural break in speech delivery.' },
+    { id: 'Breathe', tag: '[break]', icon: Waves, color: 'text-blue-400', hint: 'Inserts a longer silence for structural emphasis.' },
+    { id: 'Whisper', tag: '[whisper]', icon: Wind, color: 'text-slate-400', hint: 'Lowers volume to a breathy, intimate air.' },
+    { id: 'Shout', tag: '[shout]', icon: Volume2, color: 'text-rose-500', hint: 'Projects voice with high power and intensity.' },
+    { id: 'Happy', tag: '[happy]', icon: Smile, color: 'text-emerald-500', hint: 'Adds a cheerful, bright, and upbeat inflection.' },
+    { id: 'Sad', tag: '[sad]', icon: Frown, color: 'text-sky-500', hint: 'Delivers words with a somber and mournful tone.' },
+    { id: 'Angry', tag: '[angry]', icon: Angry, color: 'text-red-600', hint: 'Forces a stern and authoritative articulation.' },
+    { id: 'Pulse', tag: '[stutter]', icon: Activity, color: 'text-purple-500', hint: 'Simulates a slight, rhythmic repetition of sounds.' },
+    { id: 'Mystic', tag: '[mysterious]', icon: Ghost, color: 'text-indigo-400', hint: 'Lowers pitch for an intriguing, cinematic feel.' },
+    { id: 'Suspense', tag: '[suspense]', icon: Music, color: 'text-orange-500', hint: 'Slows delivery to build dramatic tension.' },
+    { id: 'Radio', tag: '[announcer]', icon: Radio, color: 'text-blue-600', hint: 'Adds high-energy, compressed broadcast presence.' },
+    { id: 'News', tag: '[news]', icon: Newspaper, color: 'text-slate-700', hint: 'Neutral, objective reporting style.' },
+    { id: 'Robot', tag: '[robotic]', icon: Cpu, color: 'text-slate-500', hint: 'Removes inflection for a flat, mechanical monotone.' },
+    { id: 'Breathe', tag: '[breathy]', icon: ShieldCheck, color: 'text-teal-400', hint: 'Enhances audible air intake and vocal texture.' },
+    { id: 'Formal', tag: '[formal]', icon: Briefcase, color: 'text-slate-800', hint: 'Ensures precise, steady professional focus.' },
+    { id: 'Confused', tag: '[confused]', icon: HelpCircle, color: 'text-amber-600', hint: 'Adds hesitant, uncertain pitch variations.' },
+    { id: 'Energy', tag: '[energetic]', icon: Zap, color: 'text-yellow-500', hint: 'Increases pace with high spirit and drive.' },
+    { id: 'Chill', tag: '[relaxed]', icon: Coffee, color: 'text-orange-400', hint: 'Casual, laid-back conversational tone.' },
   ];
 
-  const durations = [10, 30, 60, 0];
+  const durations = [10, 30];
 
   return (
     <div className={`flex flex-col h-screen transition-colors duration-200 ${isDark ? 'bg-slate-950 text-slate-200' : 'bg-white text-slate-900'}`}>
-      {/* Quota Banner */}
       {state.error === "QUOTA_EXHAUSTED" && (
         <div className="bg-amber-600 text-white px-8 py-3 flex items-center justify-between text-xs font-bold animate-in slide-in-from-top duration-300">
           <div className="flex items-center gap-3">
@@ -157,7 +191,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Header */}
       <header className={`flex items-center justify-between px-8 py-4 border-b z-20 shrink-0 ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-100 bg-white'}`}>
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
@@ -167,7 +200,6 @@ const App: React.FC = () => {
             <h1 className="text-lg font-bold tracking-tight">Voice<span className="text-indigo-600">Studio</span></h1>
           </div>
 
-          {/* Quota & Status Display */}
           <div className="hidden md:flex items-center gap-4 pl-6 border-l border-slate-100 dark:border-slate-800">
             <div className="flex flex-col">
                <span className="text-[9px] font-black uppercase tracking-widest opacity-30 mb-0.5">API Status</span>
@@ -178,7 +210,7 @@ const App: React.FC = () => {
                       {!hasApiKey ? 'Unlinked' : state.error === 'QUOTA_EXHAUSTED' ? 'Exhausted' : 'Quota Active'}
                     </span>
                   </div>
-                  {hasApiKey && (
+                  {hasApiKey && (window as any).aistudio && (
                     <a 
                       href="https://aistudio.google.com/app/usage" target="_blank" rel="noreferrer"
                       className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:underline"
@@ -192,11 +224,17 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+          <div className={`hidden sm:flex items-center gap-2 px-3 py-1 rounded-full border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+             {user?.avatarUrl && <img src={user.avatarUrl} alt={user.name} className="w-5 h-5 rounded-full" />}
+             <span className="text-[10px] font-bold">{user?.name}</span>
+          </div>
+
           <button 
-            onClick={handleOpenKeySelector}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-indigo-600 hover:bg-slate-100'}`}
+            onClick={logout}
+            className={`p-2 rounded-md transition-all ${isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white' : 'bg-slate-100 text-slate-500 hover:text-indigo-600 hover:bg-slate-200'}`}
+            title="Sign Out"
           >
-            <Key className="w-3.5 h-3.5" /> {hasApiKey ? 'Change Key' : 'Setup Key'}
+            <LogOut className="w-4 h-4" />
           </button>
           
           <button 
@@ -218,7 +256,6 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex flex-1 overflow-hidden flex-col lg:flex-row relative">
-        {/* Editor Section */}
         <section className={`flex-1 flex flex-col min-w-0 border-r ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
           <div className="flex-1 relative">
             <textarea
@@ -239,11 +276,10 @@ const App: React.FC = () => {
             )}
           </div>
 
-          {/* AI Panel */}
           <div className={`p-8 pt-16 border-t transition-all ${isDark ? 'border-slate-800 bg-slate-900/40' : 'border-slate-100 bg-slate-50/50'}`}>
             <div className="flex flex-col gap-8">
               <div className="flex flex-col md:flex-row gap-4 items-end md:items-center">
-                <div className="flex-1 relative w-full">
+                <div className="flex-1 relative w-full group/input">
                   <div className={`absolute -top-7 left-0 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     <Wand2 className="w-3.5 h-3.5 text-indigo-500" />
                     <span>AI Directive Command</span>
@@ -262,37 +298,56 @@ const App: React.FC = () => {
                       EXECUTE
                     </button>
                   </div>
+                  {/* Custom Tooltip for Directive */}
+                  <div className="absolute -top-12 right-0 opacity-0 group-hover/input:opacity-100 transition-opacity pointer-events-none z-30">
+                     <div className={`px-3 py-1.5 rounded shadow-xl text-[10px] font-bold whitespace-nowrap border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+                       Rewrite the entire script using natural language instructions.
+                     </div>
+                  </div>
                 </div>
 
-                <button
-                  onClick={() => handleAnalyze()} disabled={state.isAnalyzing || !state.text.trim()}
-                  className={`flex items-center gap-3 px-5 py-3 rounded-md border transition-all shrink-0 ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-600'}`}
-                >
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  <span className="text-[10px] font-bold tracking-[0.1em] uppercase opacity-70">Smart Enhance</span>
-                </button>
+                <div className="relative group/enhance">
+                  <button
+                    onClick={() => handleAnalyze()} disabled={state.isAnalyzing || !state.text.trim()}
+                    className={`flex items-center gap-3 px-5 py-3 rounded-md border transition-all shrink-0 ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-600'}`}
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span className="text-[10px] font-bold tracking-[0.1em] uppercase opacity-70">Smart Enhance</span>
+                  </button>
+                  <div className="absolute -top-12 right-0 opacity-0 group-hover/enhance:opacity-100 transition-opacity pointer-events-none z-30">
+                     <div className={`px-3 py-1.5 rounded shadow-xl text-[10px] font-bold whitespace-nowrap border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+                       Automatically optimize pacing and prosody tags for professional delivery.
+                     </div>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-9 gap-2">
                 {palette.map((tag) => (
-                  <button
-                    key={tag.id} 
-                    onClick={() => insertAtCursor(tag.tag)}
-                    title={tag.hint}
-                    className={`group relative flex items-center gap-2 px-3 py-2 rounded-md border text-left transition-all hover:border-slate-400 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}
-                  >
-                    <tag.icon className={`w-3.5 h-3.5 shrink-0 ${tag.color}`} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider opacity-70 truncate group-hover:opacity-100">{tag.id}</span>
-                  </button>
+                  <div key={tag.id} className="relative group">
+                    <button
+                      onClick={() => insertAtCursor(tag.tag)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md border text-left transition-all hover:border-indigo-400 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}
+                    >
+                      <tag.icon className={`w-3.5 h-3.5 shrink-0 ${tag.color}`} />
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-70 truncate group-hover:opacity-100">{tag.id}</span>
+                    </button>
+                    {/* CUSTOM TOOLTIP */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30 min-w-[160px]">
+                      <div className={`px-3 py-2 rounded shadow-2xl text-[10px] border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <div className="font-black text-indigo-500 mb-1 uppercase tracking-widest">{tag.id} <span className="opacity-50 text-[8px]">({tag.tag})</span></div>
+                        <div className="leading-relaxed opacity-80">{tag.hint}</div>
+                      </div>
+                      <div className={`w-2 h-2 rotate-45 mx-auto -mt-1 border-r border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}></div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
           </div>
         </section>
 
-        {/* Sidebar Controls */}
         <aside className={`w-full lg:w-[380px] p-8 space-y-8 overflow-y-auto shrink-0 border-l ${isDark ? 'bg-slate-900/20 border-slate-800' : 'bg-slate-50/30 border-slate-100'}`}>
-          
           <div className="space-y-4">
             <label className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40 flex items-center gap-2">
               <Settings2 className="w-3.5 h-3.5" /> Persona
@@ -333,7 +388,7 @@ const App: React.FC = () => {
                   key={d} onClick={() => setState(prev => ({ ...prev, previewDuration: d }))} 
                   className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition-all ${state.previewDuration === d ? 'bg-indigo-600 text-white' : 'opacity-40 hover:opacity-100 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                 >
-                  {d === 0 ? 'FULL' : d >= 60 ? '1M' : `${d}S`}
+                  {`${d}S`}
                 </button>
               ))}
             </div>
@@ -348,6 +403,11 @@ const App: React.FC = () => {
             previewText={state.text}
             isDark={isDark}
             onError={handleError}
+            onPreviewComplete={(url) => {
+              setHasPreviewed(true);
+              setIsFullMaster(false);
+              setState(prev => ({ ...prev, audioUrl: url }));
+            }}
           />
 
           <div className="sticky bottom-0 bg-transparent pt-4">
@@ -358,9 +418,14 @@ const App: React.FC = () => {
               hasText={state.text.length > 0} 
               speed={speed} 
               isDark={isDark}
+              isGenerateDisabled={!hasPreviewed}
+              isFullMaster={isFullMaster}
             />
             {state.error && state.error !== "QUOTA_EXHAUSTED" && (
               <p className="mt-3 text-[10px] text-rose-500 font-bold text-center uppercase tracking-widest">{state.error}</p>
+            )}
+            {!hasPreviewed && state.text.length > 0 && !state.isLoading && (
+              <p className="mt-2 text-[9px] text-slate-400 font-bold text-center uppercase tracking-widest animate-pulse">Preview required before master generation</p>
             )}
           </div>
 
@@ -377,5 +442,29 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+// Main App Container to handle Auth State Routing
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AuthConsumer />
+    </AuthProvider>
+  );
+}
+
+// Helper component to consume auth context and conditionally render
+const AuthConsumer: React.FC = () => {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-950">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      </div>
+    );
+  }
+
+  return user ? <VoiceStudioApp /> : <LoginScreen />;
+}
 
 export default App;
