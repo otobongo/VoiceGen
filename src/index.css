@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  VoiceGen design tokens — Cal.com design language.
+  Near-monochrome, generous whitespace, subtle borders, near-black primary in
+  light mode / near-white primary in dark. Values are HSL channels consumed via
+  hsl(var(--token)).
+*/
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+
+    /* Muted surface + secondary text */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --subtle: 0 0% 98%;
+
+    --border: 0 0% 90%;
+    --border-strong: 0 0% 83%;
+    --input: 0 0% 89%;
+    --ring: 0 0% 9%;
+
+    /* Near-black primary (Cal.com) */
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 9%;
+
+    --success: 142 71% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 45%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --radius: 0.625rem; /* 10px */
+  }
+
+  .dark {
+    --background: 0 0% 4.5%;
+    --foreground: 0 0% 96%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 96%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 60%;
+    --subtle: 0 0% 9%;
+
+    --border: 0 0% 16%;
+    --border-strong: 0 0% 24%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 83%;
+
+    /* Near-white primary in dark mode */
+    --primary: 0 0% 96%;
+    --primary-foreground: 0 0% 9%;
+
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 96%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 96%;
+
+    --success: 142 64% 45%;
+    --success-foreground: 0 0% 7%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 7%;
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 0 0% 100%;
+  }
+
+  /*
+    Alternate "shadcn" skin (adopted from the other build): teal brand accent
+    on a near-neutral base, Geist font, slightly tighter radius. Selected via
+    [data-skin="shadcn"] on <html>; dark variant combines with .dark.
+  */
+  [data-skin='shadcn'] {
+    --radius: 0.5rem;
+
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --subtle: 0 0% 98%;
+
+    --border: 0 0% 89.8%;
+    --border-strong: 0 0% 83.1%;
+    --input: 0 0% 89.8%;
+
+    /* Teal brand accent */
+    --primary: 190 76% 40%; /* #189AB4 */
+    --primary-foreground: 0 0% 100%;
+    --ring: 190 76% 40%;
+    --accent: 184 56% 89%; /* #D4F1F4 */
+    --accent-foreground: 199 89% 19%; /* #05445E */
+    --secondary: 174 68% 68%; /* #75E6DA */
+    --secondary-foreground: 199 89% 19%;
+
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --font-sans: 'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
+
+  [data-skin='shadcn'].dark,
+  .dark [data-skin='shadcn'] {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 88%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 88%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 88%;
+
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 64%;
+    --subtle: 0 0% 10%;
+
+    --border: 0 0% 20%;
+    --border-strong: 0 0% 28%;
+    --input: 0 0% 24%;
+
+    --primary: 187 71% 53%; /* brighter teal in dark */
+    --primary-foreground: 0 0% 7%;
+    --ring: 187 71% 53%;
+    --accent: 199 60% 20%;
+    --accent-foreground: 184 56% 89%;
+    --secondary: 174 45% 30%;
+    --secondary-foreground: 0 0% 95%;
+  }
+
+  /* Apply the active skin's font family. */
+  body {
+    font-family: var(--font-sans, 'Inter', ui-sans-serif, system-ui, sans-serif);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Consistent focus ring across interactive elements */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Minimal scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-strong rounded-full;
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer components {
+  /* Wide-tracked uppercase micro label — a Cal.com signature. */
+  .label-micro {
+    @apply text-micro font-semibold uppercase text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  /* Respect reduced-motion globally. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

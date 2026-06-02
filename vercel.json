@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/generate-speech.ts": {
+      "maxDuration": 60
+    },
+    "api/prepare-copy.ts": {
+      "maxDuration": 30
+    },
+    "api/audit.ts": {
+      "maxDuration": 30
+    }
+  }
+}
