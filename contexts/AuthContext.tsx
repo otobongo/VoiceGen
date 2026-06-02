@@ -1,18 +1,13 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
-
-// In a real app, this would be enforced by Firebase Security Rules or a Cloud Function
-// For now, we enforce it here to simulate the "Beta Access" restriction.
-const ALLOWED_EMAILS = [
-  'demo@voicestudio.ai', 
-  'admin@voicestudio.ai', 
-  'user@example.com'
-];
+import { auth, googleProvider } from '../firebase';
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, name: string) => Promise<boolean>;
+  login: () => Promise<boolean>;
+  loginAsGuest: () => Promise<boolean>;
   logout: () => void;
   isLoading: boolean;
   authError: string | null;
@@ -25,61 +20,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Check for persisted session on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('voice_studio_user');
-    if (storedUser) {
-      try {
-        const parsed = JSON.parse(storedUser);
-        // Re-validate stored user against allow list (security best practice)
-        if (ALLOWED_EMAILS.includes(parsed.email)) {
-          setUser(parsed);
-        } else {
-          localStorage.removeItem('voice_studio_user');
-        }
-      } catch (e) {
-        localStorage.removeItem('voice_studio_user');
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          id: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          name: firebaseUser.displayName || 'User',
+          avatarUrl: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.displayName || 'User'}`
+        });
+      } else {
+        setUser(null);
       }
-    }
-    setIsLoading(false);
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const login = async (email: string, name: string): Promise<boolean> => {
+  const login = async (): Promise<boolean> => {
     setIsLoading(true);
     setAuthError(null);
     
-    // Simulate Network Delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // 1. Validation Logic (The "Security Rule")
-    if (!ALLOWED_EMAILS.includes(email.toLowerCase())) {
-      setAuthError("Access Denied: Your email is not on the beta access list.");
+    try {
+      await signInWithPopup(auth, googleProvider);
+      return true;
+    } catch (error: any) {
+      console.error("Login error:", error);
+      setAuthError(error.message || "Failed to log in with Google.");
       setIsLoading(false);
       return false;
     }
+  };
 
-    // 2. Success Logic
-    const newUser: User = {
-      id: Date.now().toString(),
-      email: email.toLowerCase(),
-      name,
-      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`
-    };
-
-    setUser(newUser);
-    localStorage.setItem('voice_studio_user', JSON.stringify(newUser));
+  const loginAsGuest = async (): Promise<boolean> => {
+    setIsLoading(true);
+    setAuthError(null);
+    
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    setUser({
+      id: 'guest-' + Math.random().toString(36).substring(2, 9),
+      email: 'guest@voicestudio.app',
+      name: 'Guest User',
+      avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=Guest`
+    });
+    
     setIsLoading(false);
     return true;
   };
 
-  const logout = () => {
-    setUser(null);
-    setAuthError(null);
-    localStorage.removeItem('voice_studio_user');
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      // If it was a guest user, clear the state manually since signOut won't trigger onAuthStateChanged for non-firebase users
+      setUser(null);
+      setAuthError(null);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading, authError }}>
+    <AuthContext.Provider value={{ user, login, loginAsGuest, logout, isLoading, authError }}>
       {children}
     </AuthContext.Provider>
   );

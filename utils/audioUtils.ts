@@ -1,3 +1,4 @@
+
 /**
  * Decodes a base64 string into a Uint8Array.
  */
@@ -64,28 +65,14 @@ export function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
 }
 
 /**
- * Processes the raw Base64 audio from Gemini and returns a Blob URL for a WAV file.
+ * Processes the raw ArrayBuffer audio from Gemini and returns a Blob URL for a WAV file.
  */
-export async function processGeminiAudio(base64Data: string): Promise<string> {
-  // 1. Decode Base64 to raw bytes
-  const audioBytes = decodeBase64(base64Data);
-
-  // 2. Decode raw PCM data (Gemini sends raw PCM usually, but let's try assuming it needs decoding via Context first if headers are missing, 
-  // or strictly interpreting as PCM if we knew the format. 
-  // The Gemini docs say it's raw PCM. We need to convert that to an AudioBuffer.
-  // Raw PCM is simply a sequence of amplitude values.
-  
-  // Create an Int16Array from the bytes (assuming 16-bit PCM)
-  const int16Data = new Int16Array(audioBytes.buffer);
-  
-  // Convert Int16 to Float32 for the Web Audio API
+export async function processGeminiAudio(audioBuffer: ArrayBuffer): Promise<string> {
+  const int16Data = new Int16Array(audioBuffer);
   const float32Data = new Float32Array(int16Data.length);
   for (let i = 0; i < int16Data.length; i++) {
     float32Data[i] = int16Data[i] / 32768.0;
   }
-
-  // 3. Create WAV file from Float32 data
-  const wavBlob = encodeWAV(float32Data, 24000); // Gemini 2.5 Flash TTS is typically 24kHz
-
+  const wavBlob = encodeWAV(float32Data, 24000); 
   return URL.createObjectURL(wavBlob);
 }

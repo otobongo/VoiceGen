@@ -1,38 +1,94 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gemini Voice Studio</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          var localTheme = localStorage.getItem('theme');
+          var sysTheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (localTheme === 'dark' || (!localTheme && sysTheme)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+          } else {
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+        } catch (e) {}
+      })();
+    </script>
     <style>
+      :root {
+        --font-sans: 'Inter', sans-serif;
+        --font-display: 'Outfit', sans-serif;
+      }
       body {
-        font-family: 'Inter', sans-serif;
-        overflow: hidden;
+        font-family: var(--font-sans);
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         text-rendering: optimizeLegibility;
       }
+      h1, h2, h3, h4, h5, h6, .font-display {
+        font-family: var(--font-display);
+      }
       /* Custom minimal scrollbar */
-      textarea::-webkit-scrollbar {
+      textarea::-webkit-scrollbar, div::-webkit-scrollbar {
         width: 6px;
       }
-      textarea::-webkit-scrollbar-track {
+      textarea::-webkit-scrollbar-track, div::-webkit-scrollbar-track {
         background: transparent;
       }
-      textarea::-webkit-scrollbar-thumb {
+      textarea::-webkit-scrollbar-thumb, div::-webkit-scrollbar-thumb {
         background: #e2e8f0;
+        border-radius: 3px;
       }
-      .dark textarea::-webkit-scrollbar-thumb {
+      .dark textarea::-webkit-scrollbar-thumb, .dark div::-webkit-scrollbar-thumb {
         background: #334155;
       }
-      textarea::-webkit-scrollbar-thumb:hover {
+      textarea::-webkit-scrollbar-thumb:hover, div::-webkit-scrollbar-thumb:hover {
         background: #cbd5e1;
       }
       /* Remove tap highlight on mobile */
       * {
         -webkit-tap-highlight-color: transparent;
+      }
+      
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      /* Animations */
+      @keyframes spin-slow {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .animate-spin-slow {
+        animation: spin-slow 8s linear infinite;
+      }
+
+      @keyframes shimmer {
+        from {
+          background-position: 0 0;
+        }
+        to {
+          background-position: -200% 0;
+        }
+      }
+      .bg-shimmer {
+        background: linear-gradient(to right, transparent 0%, rgba(255,255,255,0.1) 50%, transparent 100%);
+        background-size: 200% 100%;
+        animation: shimmer 2s infinite linear;
       }
     </style>
   <script type="importmap">
@@ -46,8 +102,10 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>

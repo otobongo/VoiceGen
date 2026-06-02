@@ -1,30 +1,4 @@
-
-import { GoogleGenAI, Modality } from "@google/genai";
-import { VoiceName, PersonaType } from "../types";
-
-// Helper to get key from various potential sources (Vite, Process, or Direct)
-const getApiKey = (): string => {
-  // @ts-ignore - Check Vite env
-  if (import.meta.env && import.meta.env.VITE_API_KEY) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_KEY;
-  }
-  // Check standard process.env
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-    return process.env.API_KEY;
-  }
-  return '';
-};
-
-const PERSONA_PROMPTS: Record<PersonaType, string> = {
-  neutral: "",
-  african: "Speak with a warm, rhythmic African accent: ",
-  nigerian: "Speak with a vibrant, clear Nigerian accent, using authentic local inflections, rhythm, and tonal emphasis: ",
-  british: "Speak with a clear, sophisticated British Received Pronunciation: ",
-  american: "Speak with a standard, friendly General American accent: ",
-  storyteller: "Speak in a captivating, expressive storytelling tone with dynamic range: ",
-  corporate: "Speak in a professional, steady, and clear corporate presentation style: "
-};
+import { VoiceName, PersonaType, GenerationResult, AuditResult, AnalysisChange } from "../types";
 
 /**
  * Robust retry wrapper with exponential backoff for API errors.
@@ -35,8 +9,31 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
     try {
       return await fn();
     } catch (error: any) {
-      const isQuotaError = error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED');
-      if (isQuotaError && i < maxRetries - 1) {
+      let errorMessage = "";
+      if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      } else if (error?.error?.message) {
+        errorMessage = error.error.message;
+      } else {
+        try {
+          errorMessage = JSON.stringify(error);
+        } catch (e) {
+          errorMessage = "Unknown error";
+        }
+      }
+
+      const isQuotaExhausted = errorMessage.includes('exceeded your current quota') || errorMessage.includes('billing details');
+      const isRetryable = !isQuotaExhausted && (
+                          errorMessage.includes('429') || 
+                          errorMessage.includes('RESOURCE_EXHAUSTED') || 
+                          errorMessage.includes('500') || 
+                          errorMessage.includes('INTERNAL') || 
+                          errorMessage.includes('503')
+      );
+                          
+      if (isRetryable && i < maxRetries - 1) {
         await new Promise(resolve => setTimeout(resolve, delay));
         delay *= 2;
         continue;
@@ -47,8 +44,58 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   return fn(); // Final attempt
 }
 
+// Function to smoothly combine audio chunks into a single ArrayBuffer (kept client-side for playback handling)
+export const combineAudioChunks = (base64Chunks: string[]): ArrayBuffer => {
+  // Convert all base64 chunks to Uint8Arrays
+  const byteArrays = base64Chunks.map(base64 => {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  });
+
+  // Calculate total length
+  const totalLength = byteArrays.reduce((acc, curr) => acc + curr.length, 0);
+
+  // Combine into a single Uint8Array
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const array of byteArrays) {
+    combined.set(array, offset);
+    offset += array.length;
+  }
+
+  return combined.buffer;
+};
+
+// Helper to chunk text
+const chunkText = (text: string, maxChunkLength: number = 1000): string[] => {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    if ((currentChunk.length + sentence.length) > maxChunkLength && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+    currentChunk += sentence + ' ';
+  }
+  
+  if (currentChunk.trim().length > 0) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  return chunks;
+};
+
+// Replace text tags logic (already moved to server, but kept locally here in case we need it)
 const preprocessText = (text: string, persona: PersonaType): string => {
   let processed = text.replace(/\r\n/g, '\n');
+  const resetCue = persona !== 'neutral' ? `(resume ${persona} persona)` : '(resume normal tone)';
+
   const scopedTags = [
     { tag: 'whisper', instruction: 'whispering' },
     { tag: 'shout', instruction: 'shouting' },
@@ -75,82 +122,86 @@ const preprocessText = (text: string, persona: PersonaType): string => {
   ];
 
   scopedTags.forEach(({ tag, instruction }) => {
-    const regex = new RegExp(`\\[${tag}\\](.*?)([.!?;]|$)`, 'gi');
-    processed = processed.replace(regex, `(${instruction}) $1$2 (returning to normal voice) `);
+    const regex = new RegExp(`\\[${tag}\\](.*?)(?=[.!?\\n]|\\[|$)`, 'gi');
+    processed = processed.replace(regex, `(${instruction}) $1 ${resetCue}`);
   });
     
   processed = processed
-    .replace(/\[pause\]/gi, '\n')
-    .replace(/\[break\]/gi, '\n\n')
-    .replace(/\[short\]/gi, '... ')
+    .replace(/\[pause\]/gi, '(pause)\n')
+    .replace(/\[break\]/gi, '(long pause)\n\n')
+    .replace(/\[short\]/gi, ', ')
     .replace(/\.\.\.(?!\s)/g, '... ')
     .replace(/ +/g, ' ')
     .trim();
 
-  return PERSONA_PROMPTS[persona] + processed;
+  return processed;
 };
 
-export const analyzeScript = async (text: string, instructions?: string): Promise<string> => {
-  return withRetry(async () => {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error("API Key missing. Please set VITE_API_KEY.");
-    
-    const ai = new GoogleGenAI({ apiKey });
-    const systemPrompt = `
-      You are an expert Voice Director and Script Editor.
-      TASK: ${instructions ? `Modify the script based on: "${instructions}"` : 'Refine the script for professional TTS delivery.'}
-      
-      AVAILABLE TAGS:
-      - [pause], [break], [short]
-      - [whisper], [shout], [excited], [happy], [sad], [angry], [stutter], [relaxed], [formal], [muffled], [robotic], [breathy]
-      - [slow], [fast], [high], [deep], [mysterious], [suspense], [announcer], [news], [confused], [energetic]
-      
-      STRICT RULES:
-      1. SCOPE: Prosody tags MUST ONLY apply to the single sentence they start in.
-      2. ENDING: Add a single [pause] at the end of EVERY paragraph.
-      3. FORMATTING: Separate paragraphs with exactly TWO newline characters.
-      4. RETURN ONLY SCRIPT: No conversational filler.
-      
-      SCRIPT:
-      ${text}
-    `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: [{ parts: [{ text: systemPrompt }] }],
+export const auditScript = async (text: string): Promise<AuditResult> => {
+  return withRetry(async () => {
+    const response = await fetch('/api/audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
     });
-    return response.text || text;
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+    
+    return await response.json();
   });
 };
 
-export const generateSpeech = async (text: string, voice: VoiceName, persona: PersonaType, durationLimit: number = 0): Promise<string> => {
+export const analyzeScript = async (text: string, instructions?: string, preserveText: boolean = true): Promise<{ text: string, changes: AnalysisChange[] }> => {
   return withRetry(async () => {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error("API Key missing. Please set VITE_API_KEY.");
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, preserveText, instructionsString: instructions })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+    
+    return await response.json();
+  });
+};
 
-    const ai = new GoogleGenAI({ apiKey });
+export const generateSpeech = async (text: string, voice: VoiceName, persona: PersonaType, durationLimit: number = 0): Promise<GenerationResult> => {
+  return withRetry(async () => {
     let finalRawText = text;
     if (durationLimit > 0) {
       const wordCount = Math.floor(durationLimit * 2.5);
-      const words = text.split(/\s+/);
+      const words = text.split(/\\s+/);
       if (words.length > wordCount) finalRawText = words.slice(0, wordCount).join(' ') + '...';
     }
 
     const optimizedText = preprocessText(finalRawText, persona);
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: optimizedText }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
-        },
-      },
+    const chunks = chunkText(optimizedText, 1000).filter(c => /[a-zA-Z0-9]/.test(c));
+
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ finalRawText, voice, persona, chunks })
     });
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) throw new Error("No audio data returned.");
-    return base64Audio;
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    const arrayBuffer = combineAudioChunks(result.audioChunks);
+    
+    return {
+      audioData: arrayBuffer,
+      usage: result.usage
+    };
   });
 };

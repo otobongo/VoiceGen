@@ -1,0 +1,123 @@
+/* 
+  Market View CSS 
+  This file contains styles specifically for pages outside the logged-in app.
+  It is disconnected from the App view's manual dark mode switch and 
+  instead respects the system's color scheme preference.
+*/
+
+.market-view {
+  /* Core Shadcn Variables (Light Mode) */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96.1%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 0 0% 96.1%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 89.8%;
+  --input: 0 0% 89.8%;
+  --ring: 0 0% 9%;
+
+  /* Mint */
+  --mint: 152 81% 96%;
+  --mint-strong: 149 80% 90%;
+  --mint-foreground: 166 91% 20%;
+  --mint-border: 152 76% 80%;
+
+  /* Default (Light Mode) Auth Palette - Monochrome Luxury */
+  --color-accent-primary: #111111;
+  --color-accent-primary-hover: #333333;
+  --color-accent-primary-active: #000000;
+  --color-accent-primary-subtle: #F4F4F5;
+  --color-accent-secondary: #666666;
+  --color-accent-structural: #222222;
+  --color-accent-on-accent: #FFFFFF;
+}
+
+/* 
+  Force override any global data-theme="dark" styles 
+  that might try to cascade into the market-view.
+  We set them to the LIGHT mode variables by default.
+*/
+[data-theme="dark"] .market-view {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96.1%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 0 0% 96.1%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 89.8%;
+  --input: 0 0% 89.8%;
+  --ring: 0 0% 9%;
+
+  --mint: 152 81% 96%;
+  --mint-strong: 149 80% 90%;
+  --mint-foreground: 166 91% 20%;
+  --mint-border: 152 76% 80%;
+
+  --color-accent-primary: #111111;
+  --color-accent-primary-hover: #333333;
+  --color-accent-primary-active: #000000;
+  --color-accent-primary-subtle: #F4F4F5;
+  --color-accent-secondary: #666666;
+  --color-accent-structural: #222222;
+  --color-accent-on-accent: #FFFFFF;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Apply dark mode variables regardless of data-theme */
+  .market-view,
+  [data-theme="dark"] .market-view {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 88%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 88%;
+    --popover: 0 0% 17%;
+    --popover-foreground: 0 0% 88%;
+    --primary: 0 0% 88%;
+    --primary-foreground: 0 0% 7%;
+    --secondary: 0 0% 100% / 0.08;
+    --secondary-foreground: 0 0% 88%;
+    --muted: 0 0% 100% / 0.08;
+    --muted-foreground: 0 0% 63%;
+    --accent: 0 0% 100% / 0.12;
+    --accent-foreground: 0 0% 88%;
+    --destructive: 0 75% 65%;
+    --destructive-foreground: 0 0% 7%;
+    --border: 0 0% 100% / 0.12;
+    --input: 0 0% 100% / 0.20;
+    --ring: 0 0% 100% / 0.24;
+
+    --mint: 152 81% 10%;
+    --mint-strong: 149 80% 15%;
+    --mint-foreground: 166 91% 80%;
+    --mint-border: 152 76% 20%;
+
+    --color-accent-primary: #FFFFFF;
+    --color-accent-primary-hover: #E4E4E7;
+    --color-accent-primary-active: #FFFFFF;
+    --color-accent-primary-subtle: rgba(255, 255, 255, 0.1);
+    --color-accent-secondary: #A1A1AA;
+    --color-accent-structural: rgba(255, 255, 255, 0.2);
+    --color-accent-on-accent: #000000;
+  }
+}

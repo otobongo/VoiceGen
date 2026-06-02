@@ -10,6 +10,7 @@ export enum VoiceName {
 export type PersonaType = 'neutral' | 'african' | 'nigerian' | 'british' | 'american' | 'storyteller' | 'corporate';
 
 export type ModeType = 'light' | 'dark';
+export type ViewMode = 'prepare' | 'preview' | 'finalize';
 
 export interface VoiceOption {
   id: VoiceName;
@@ -19,12 +20,28 @@ export interface VoiceOption {
 }
 
 export const VOICE_OPTIONS: VoiceOption[] = [
+  { id: VoiceName.Kore, name: 'Kore', description: 'Calm & soothing', gender: 'Female' },
+  { id: VoiceName.Zephyr, name: 'Zephyr', description: 'Soft & gentle', gender: 'Female' },
   { id: VoiceName.Puck, name: 'Puck', description: 'Energetic & clear', gender: 'Male' },
   { id: VoiceName.Charon, name: 'Charon', description: 'Deep & authoritative', gender: 'Male' },
-  { id: VoiceName.Kore, name: 'Kore', description: 'Calm & soothing', gender: 'Female' },
   { id: VoiceName.Fenrir, name: 'Fenrir', description: 'Strong & dynamic', gender: 'Male' },
-  { id: VoiceName.Zephyr, name: 'Zephyr', description: 'Soft & gentle', gender: 'Female' },
 ];
+
+export interface ScriptIssue {
+  original: string;
+  type: 'spelling' | 'non-english';
+  suggestion: string;
+}
+
+export interface AnalysisChange {
+  description: string;
+  originalSnippet: string;
+  newSnippet: string;
+}
+
+export interface MasterAudioUrls {
+  wav: string;
+}
 
 export interface TTSState {
   text: string;
@@ -33,10 +50,25 @@ export interface TTSState {
   persona: PersonaType;
   isLoading: boolean;
   isAnalyzing: boolean;
-  audioUrl: string | null;
+  
+  // Audio State
+  audioUrl: string | null; // For previewing (WAV)
+  masterUrls: MasterAudioUrls | null; // For finalizing
+  
   error: string | null;
   previewDuration: number;
   mode: ModeType;
+  viewMode: ViewMode;
+  sessionUsage: number;
+  lastUsage: number;
+  
+  // Audit State
+  isAuditing: boolean;
+  scriptIssues: ScriptIssue[];
+  lastAuditedText: string | null;
+  
+  // Analysis Summary
+  analysisChanges: AnalysisChange[];
 }
 
 export interface User {
@@ -44,4 +76,21 @@ export interface User {
   name: string;
   email: string;
   avatarUrl?: string;
+}
+
+export interface GenerationResult {
+  audioData: ArrayBuffer;
+  usage: {
+    totalTokens: number;
+    promptTokens: number;
+    candidatesTokens: number;
+  }
+}
+
+export interface AuditResult {
+  isValid: boolean;
+  issues: ScriptIssue[];
+  usage: {
+    totalTokens: number;
+  }
 }
