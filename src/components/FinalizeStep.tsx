@@ -2,6 +2,7 @@ import { ArrowLeft, Coins, Loader2, Lock, Mic, Sparkles } from 'lucide-react';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
 import { AudioPlayer } from './AudioPlayer';
+import { downloadBlob } from '@/lib/audio';
 import { PERSONA_OPTIONS } from '@/lib/types';
 import type { StudioApi } from '@/hooks/useStudio';
 
@@ -32,6 +33,7 @@ export function FinalizeStep({ studio }: FinalizeStepProps) {
     exportTake,
     error,
     dismissError,
+    reportError,
     goToStep,
   } = studio;
 
@@ -41,17 +43,13 @@ export function FinalizeStep({ studio }: FinalizeStepProps) {
   // Generate, then auto-download AND keep the player visible (both, per spec).
   const handleGenerate = async () => {
     const take = await generateMaster();
+    // generateMaster already surfaced a banner if it failed; nothing to add.
     if (!take) return;
+    // exportTake surfaces NO_AUDIO_TO_EXPORT / EXPORT_FAILED itself on null.
     const blob = exportTake(take.id, speed);
     if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `voicegen-${take.voice.toLowerCase()}-master.wav`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const ok = downloadBlob(blob, `voicegen-${take.voice.toLowerCase()}-master.wav`);
+    if (!ok) reportError('DOWNLOAD_FAILED');
   };
 
   return (
@@ -137,7 +135,12 @@ export function FinalizeStep({ studio }: FinalizeStepProps) {
         </div>
 
         {masterTake && (
-          <AudioPlayer take={masterTake} speed={speed} onExport={exportTake} />
+          <AudioPlayer
+            take={masterTake}
+            speed={speed}
+            onExport={exportTake}
+            onError={reportError}
+          />
         )}
       </aside>
     </div>

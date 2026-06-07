@@ -27,13 +27,12 @@ export type Scope = 'preview' | 'full';
 
 export type ThemeMode = 'light' | 'dark';
 
-// Signed-in user (from Firebase Auth or the guest fallback).
+// Signed-in user (from Firebase Auth).
 export interface User {
   id: string;
   email: string;
   name: string;
   avatarUrl?: string;
-  isGuest?: boolean;
 }
 
 export type WizardStep = 'prepare' | 'preview' | 'finalize';
@@ -206,6 +205,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   UPSTREAM_AUTH: 'The voice service rejected the request. Check the API key configuration.',
   UPSTREAM_ERROR: 'The voice service had a problem. Please try again.',
   NO_AUDIO: 'No audio came back from the voice service. Try rephrasing or regenerating.',
+  NO_AUDIO_TO_EXPORT:
+    'There’s no rendered audio to download yet. Generate a take first, then export.',
+  EXPORT_FAILED:
+    'Couldn’t build the .WAV file from this take. Try regenerating the audio, then download again.',
+  DOWNLOAD_FAILED:
+    'The file was built but the browser blocked the download. Check your browser’s download permissions and try again.',
   EMPTY_TEXT: 'Write something first.',
   TEXT_TOO_LONG: `Your script is over the ${MAX_TEXT_LENGTH.toLocaleString()} character limit.`,
   INVALID_VOICE: 'That voice is not available. Pick another.',

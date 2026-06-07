@@ -1,9 +1,9 @@
-import { ArrowRight, Mic, ShieldAlert } from 'lucide-react';
+import { Mic, ShieldAlert } from 'lucide-react';
 import { Button } from './Button';
 import { useAuth } from '@/contexts/AuthContext';
 
 export function LoginScreen() {
-  const { login, loginAsGuest, authError } = useAuth();
+  const { login, authError } = useAuth();
 
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4 text-foreground">
@@ -26,7 +26,7 @@ export function LoginScreen() {
             <div>
               <p className="font-medium text-foreground/90">Couldn’t sign in</p>
               <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                {authError} You can continue as a guest below.
+                {authError} Please try again.
               </p>
             </div>
           </div>
@@ -37,23 +37,10 @@ export function LoginScreen() {
             <GoogleGlyph />
             Continue with Google
           </Button>
-
-          <div className="flex items-center gap-3 py-1">
-            <span className="h-px flex-1 bg-border" />
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              or
-            </span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          <Button onClick={loginAsGuest} size="lg" variant="secondary" className="w-full">
-            Continue as guest <ArrowRight className="h-4 w-4" />
-          </Button>
         </div>
 
         <p className="mt-4 text-center text-[11px] leading-relaxed text-muted-foreground">
-          Google sign-in uses Firebase. Guest mode works without an account for
-          trying things out.
+          Google sign-in uses Firebase. Your scripts are saved to your account.
         </p>
       </div>
     </div>

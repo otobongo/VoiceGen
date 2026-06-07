@@ -145,9 +145,7 @@ export function SettingsView({
               )}
               <div>
                 <p className="text-sm font-medium">{user.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {user.isGuest ? 'Guest session' : user.email}
-                </p>
+                <p className="text-xs text-muted-foreground">{user.email}</p>
               </div>
             </div>
             <Button variant="secondary" size="sm" onClick={logout}>

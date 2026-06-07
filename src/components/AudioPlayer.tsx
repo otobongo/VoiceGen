@@ -2,13 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, Pause, Play } from 'lucide-react';
 import { Button } from './Button';
 import { Waveform } from './Waveform';
+import { downloadBlob } from '@/lib/audio';
 import type { Take } from '@/lib/types';
 
 interface AudioPlayerProps {
   take: Take;
   speed: number;
-  /** Returns a speed-baked WAV blob for download. */
+  /**
+   * Returns a speed-baked WAV blob for download, or null on failure (in which
+   * case it has already surfaced an error banner via the studio).
+   */
   onExport: (takeId: string, speed: number) => Blob | null;
+  /** Report a download failure (browser blocked the save) by error code. */
+  onError?: (code: string) => void;
 }
 
 function formatTime(seconds: number): string {
@@ -18,7 +24,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function AudioPlayer({ take, speed, onExport }: AudioPlayerProps) {
+export function AudioPlayer({ take, speed, onExport, onError }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -56,16 +62,11 @@ export function AudioPlayer({ take, speed, onExport }: AudioPlayerProps) {
   };
 
   const download = () => {
+    // onExport returns null AND shows a banner on encode/missing-audio failure.
     const blob = onExport(take.id, speed);
     if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `voicegen-${take.voice.toLowerCase()}-${take.scope}.wav`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const ok = downloadBlob(blob, `voicegen-${take.voice.toLowerCase()}-${take.scope}.wav`);
+    if (!ok) onError?.('DOWNLOAD_FAILED');
   };
 
   // The displayed duration accounts for the speed the file will play at.
