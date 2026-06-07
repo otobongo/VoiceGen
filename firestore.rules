@@ -14,6 +14,14 @@ service cloud.firestore {
     //   - role: string (required) - user role ('user' or 'admin')
     //   - createdAt: timestamp (required, immutable) - creation time
     //
+    // Subcollection: users/{userId}/scripts
+    // Document ID: auto
+    // Fields:
+    //   - text: string (required, 1..5000) - the saved script
+    //   - title: string (required, 0..120) - list preview label
+    //   - createdAt: number (required) - client epoch ms; the sort key
+    // Owner-only. Stores script text only (no audio, no voice/persona/speed).
+    //
     // ===============================================================
 
     // Helper Functions
@@ -56,20 +64,39 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidScript(data) {
+      return data.keys().hasOnly(['text', 'title', 'createdAt']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 5000 &&
+             data.title is string && data.title.size() <= 120 &&
+             data.createdAt is number;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && 
-                    isOwner(userId) && 
-                    isValidUser(request.resource.data) && 
+      allow create: if isAuthenticated() &&
+                    isOwner(userId) &&
+                    isValidUser(request.resource.data) &&
                     uidUnchanged() &&
                     ((request.resource.data.role == 'user') || isAdmin());
-      allow update: if isAuthenticated() && 
-                    isOwner(userId) && 
-                    isValidUser(request.resource.data) && 
+      allow update: if isAuthenticated() &&
+                    isOwner(userId) &&
+                    isValidUser(request.resource.data) &&
                     uidNotModified() &&
                     request.resource.data.email == resource.data.email &&
                     request.resource.data.createdAt == resource.data.createdAt &&
                     ((request.resource.data.role == resource.data.role) || isAdmin());
+
+      // Saved scripts (history). Owner-only. Text/title are immutable after
+      // create; the only allowed update is bumping createdAt (de-dupe path).
+      match /scripts/{scriptId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidScript(request.resource.data);
+        allow update: if isOwner(userId) &&
+                      isValidScript(request.resource.data) &&
+                      request.resource.data.text == resource.data.text &&
+                      request.resource.data.title == resource.data.title;
+        allow delete: if isOwner(userId);
+      }
     }
   }
 }

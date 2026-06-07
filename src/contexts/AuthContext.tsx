@@ -21,9 +21,8 @@ interface AuthContextValue {
   isLoading: boolean;
   authError: string | null;
   login: () => Promise<void>;
-  loginAsGuest: () => void;
   logout: () => Promise<void>;
-  /** Firebase ID token for authenticating /api calls (null for guests). */
+  /** Firebase ID token for authenticating /api calls. */
   getIdToken: () => Promise<string | null>;
 }
 
@@ -54,12 +53,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (fbUser) => {
       if (fbUser) {
-        setIsGuest(false);
         setUser({
           id: fbUser.uid,
           email: fbUser.email ?? '',
@@ -71,14 +68,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             )}`,
         });
         void upsertProfile(fbUser);
-      } else if (!isGuest) {
+      } else {
         setUser(null);
       }
       setIsLoading(false);
     });
     return () => unsub();
-    // isGuest intentionally excluded: we only want to clear on real sign-out.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const login = useCallback(async () => {
@@ -92,20 +87,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const loginAsGuest = useCallback(() => {
-    setIsGuest(true);
-    setUser({
-      id: 'guest',
-      email: 'guest@voicegen.local',
-      name: 'Guest',
-      avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Guest',
-      isGuest: true,
-    });
-  }, []);
-
   const logout = useCallback(async () => {
     setAuthError(null);
-    setIsGuest(false);
     setUser(null);
     try {
       if (auth.currentUser) await signOut(auth);
@@ -126,7 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, authError, login, loginAsGuest, logout, getIdToken }}
+      value={{ user, isLoading, authError, login, logout, getIdToken }}
     >
       {children}
     </AuthContext.Provider>

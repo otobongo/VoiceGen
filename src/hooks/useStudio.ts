@@ -33,7 +33,17 @@ export interface StudioError {
   quota: boolean;
 }
 
-export function useStudio() {
+export interface StudioOptions {
+  /**
+   * Called with the rendered script after a successful Finalize master render.
+   * Used to auto-save the script to history. Kept optional + UI-agnostic so the
+   * hook has no direct dependency on the history store.
+   */
+  onMasterRendered?: (text: string) => void;
+}
+
+export function useStudio(options: StudioOptions = {}) {
+  const { onMasterRendered } = options;
   // Wizard
   const [step, setStep] = useState<WizardStep>('prepare');
 
@@ -254,6 +264,8 @@ export function useStudio() {
         if (prev) dropDecoded(prev.id);
         return take;
       });
+      // Auto-save the rendered script to history (Finalize only).
+      onMasterRendered?.(text);
       return take;
     } catch (err) {
       setError(toError(err));
@@ -261,7 +273,7 @@ export function useStudio() {
     } finally {
       setIsGenerating(false);
     }
-  }, [text, voice, persona, speed, isValid, isGenerating]);
+  }, [text, voice, persona, speed, isValid, isGenerating, onMasterRendered]);
 
   const insertTag = useCallback(
     (tag: string) => {
@@ -270,9 +282,23 @@ export function useStudio() {
     [text, updateText],
   );
 
+  // Build a speed-baked WAV for download. Returns null on failure AND surfaces a
+  // meaningful error banner, so a failed export is never silent. Two distinct
+  // failure modes: the take's decoded audio is gone (NO_AUDIO_TO_EXPORT), or WAV
+  // encoding threw (EXPORT_FAILED, e.g. empty/oversized samples).
   const exportTake = useCallback((takeId: string, exportSpeed: number): Blob | null => {
     const decoded = decodedRef.current.get(takeId);
-    return decoded ? exportWavAtSpeed(decoded, exportSpeed) : null;
+    if (!decoded) {
+      setError({ code: 'NO_AUDIO_TO_EXPORT', quota: false });
+      return null;
+    }
+    try {
+      return exportWavAtSpeed(decoded, exportSpeed);
+    } catch (err) {
+      console.error('[export] WAV encode failed:', err);
+      setError({ code: 'EXPORT_FAILED', quota: false });
+      return null;
+    }
   }, []);
 
   const dismissError = useCallback(() => setError(null), []);

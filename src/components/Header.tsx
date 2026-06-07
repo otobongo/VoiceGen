@@ -1,4 +1,4 @@
-import { Mic, Moon, Settings, Sun } from 'lucide-react';
+import { Clock, Mic, Moon, Settings, Sun } from 'lucide-react';
 import { Tooltip } from './Tooltip';
 import { Stepper } from './Stepper';
 import type { WizardStep } from '@/lib/types';
@@ -12,6 +12,7 @@ interface HeaderProps {
   onNavigate?: (step: WizardStep) => void;
   showStepper: boolean;
   onOpenSettings: () => void;
+  onOpenHistory: () => void;
 }
 
 export function Header({
@@ -22,6 +23,7 @@ export function Header({
   onNavigate,
   showStepper,
   onOpenSettings,
+  onOpenHistory,
 }: HeaderProps) {
   return (
     <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 py-3 sm:px-6">
@@ -41,6 +43,16 @@ export function Header({
       </div>
 
       <div className="flex items-center gap-2">
+        <Tooltip label="History" side="bottom">
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            aria-label="Open script history"
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <Clock className="h-4 w-4" />
+          </button>
+        </Tooltip>
         <Tooltip label="Settings" side="bottom">
           <button
             type="button"

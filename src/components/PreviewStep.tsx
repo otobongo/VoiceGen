@@ -129,7 +129,12 @@ export function PreviewStep({ studio, font }: PreviewStepProps) {
         </div>
 
         {previewTake && (
-          <AudioPlayer take={previewTake} speed={speed} onExport={exportTake} />
+          <AudioPlayer
+            take={previewTake}
+            speed={speed}
+            onExport={exportTake}
+            onError={reportError}
+          />
         )}
 
         <Button size="lg" onClick={() => goToStep('finalize')} disabled={!isValid} className="w-full">

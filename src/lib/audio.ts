@@ -122,3 +122,27 @@ export function exportWavAtSpeed(decoded: DecodedAudio, speed: number): Blob {
   const resampled = resample(decoded.samples, speed);
   return encodeWav(resampled, decoded.sampleRate);
 }
+
+/**
+ * Trigger a browser download of `blob` as `filename`. Returns true on success,
+ * false if the browser blocked or threw (so callers can show a meaningful
+ * error instead of failing silently).
+ */
+export function downloadBlob(blob: Blob, filename: string): boolean {
+  let url: string | null = null;
+  try {
+    url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    return true;
+  } catch (err) {
+    console.error('[download] failed:', err);
+    return false;
+  } finally {
+    if (url) setTimeout(() => URL.revokeObjectURL(url as string), 1000);
+  }
+}
