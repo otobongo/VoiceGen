@@ -82,6 +82,33 @@ SCRIPT:
 ${text}`;
 }
 
+// Clean up the model's timing tags so playback never stacks silences:
+//  - collapse adjacent timing tags ([pause]/[break]/[short]) to one (strongest),
+//  - drop a leading/trailing timing tag on a body (it would collide with the
+//    [pause] the UI inserts between contexts, doubling the gap).
+// Expression cues ([excited], [whisper], ...) are left untouched.
+const TIMING_RANK: Record<string, number> = { '[short]': 1, '[pause]': 2, '[break]': 3 };
+function normalizePacing(body: string): string {
+  let out = body;
+  // Collapse runs of timing tags (optionally separated by whitespace) to the
+  // single strongest one in the run.
+  out = out.replace(
+    /(?:\[(?:pause|break|short)\]\s*){2,}/gi,
+    (run) => {
+      const tags = run.match(/\[(?:pause|break|short)\]/gi) ?? [];
+      const strongest = tags.reduce((best, t) => {
+        const norm = t.toLowerCase();
+        return TIMING_RANK[norm] > TIMING_RANK[best] ? norm : best;
+      }, '[short]');
+      return strongest + ' ';
+    },
+  );
+  // Strip a leading timing tag (start of body) and any trailing one.
+  out = out.replace(/^\s*\[(?:pause|break|short)\]\s*/i, '');
+  out = out.replace(/\s*\[(?:pause|break|short)\]\s*$/i, '');
+  return out.trim();
+}
+
 // Compare two scripts ignoring tags/whitespace to tell whether the words
 // themselves changed (used to label the result).
 function wordingChanged(before: string, after: string): boolean {
@@ -188,7 +215,7 @@ export default async function handler(
     const contexts = (parsed.contexts ?? [])
       .map((c) => ({
         title: (c.title ?? '').trim() || 'Context',
-        body: (c.body ?? '').trim(),
+        body: normalizePacing((c.body ?? '').trim()),
       }))
       .filter((c) => c.body.length > 0)
       .slice(0, MAX_CONTEXTS);
