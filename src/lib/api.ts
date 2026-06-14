@@ -80,8 +80,10 @@ export interface SpeechResponse {
 
 /**
  * Single TTS request. For `scope: 'preview'` this returns the whole (short)
- * preview. For `scope: 'full'` it returns ONE chunk (`chunkIndex`) plus
+ * preview. For `scope: 'full'` it returns ONE span (`chunkIndex`) plus
  * `totalChunks`; the browser orchestrates the rest (see generateMasterAudio).
+ * `maxSpanChars` lets the orchestrator control span size (bigger = less drift,
+ * smaller = safer under a slow service).
  */
 export function generateSpeech(input: {
   text: string;
@@ -89,6 +91,7 @@ export function generateSpeech(input: {
   persona: PersonaType;
   scope: Scope;
   chunkIndex?: number;
+  maxSpanChars?: number;
 }): Promise<SpeechResponse> {
   return postJson<SpeechResponse>('/api/generate-speech', input);
 }
@@ -99,60 +102,66 @@ export interface MasterAudio {
   totalTokens: number | null;
 }
 
-// How many chunk requests run at once. Kept low: firing many concurrent TTS
-// calls makes the upstream model throttle (429) and intermittently fail (502),
-// so a gentle pace plus per-chunk retries is far more reliable than brute speed.
-const MASTER_CONCURRENCY = 2;
+// Span-size ladder (chars). We render the LARGEST span first so the master has
+// the fewest boundaries (= least persona drift). If the service is slow and a
+// span times out, we step DOWN to a smaller, faster span and re-render the whole
+// master. The matching concurrency drops the parallelism for big spans (a big
+// span is already slow; firing several at once makes the model throttle, which
+// is what CAUSES timeouts) and raises it for small spans.
+const SPAN_LADDER: { maxSpanChars: number; concurrency: number }[] = [
+  { maxSpanChars: 900, concurrency: 1 },
+  { maxSpanChars: 600, concurrency: 2 },
+  { maxSpanChars: 400, concurrency: 2 },
+];
 
-// Transient per-chunk failures worth retrying (vs. a bad request we shouldn't).
+// Transient per-span failures retried IN PLACE (same span size, backoff).
+// TIMEOUT is deliberately NOT here: a timeout means the span is too big for the
+// service right now, so the LADDER handles it by re-rendering smaller instead.
 const RETRYABLE_CODES = new Set([
   'RATE_LIMITED',
   'QUOTA_EXHAUSTED',
   'NO_AUDIO',
   'UPSTREAM_ERROR',
-  'TIMEOUT',
   'NETWORK',
   'UNKNOWN',
 ]);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Fetch a single chunk, retrying transient failures with exponential backoff. */
-async function fetchChunkWithRetry(
+/**
+ * Fetch a single span, retrying transient failures with exponential backoff.
+ * A TIMEOUT propagates immediately (no in-place retry) so the caller can fall
+ * back to a smaller span size.
+ */
+async function fetchSpanWithRetry(
   req: { text: string; voice: VoiceName; persona: PersonaType; scope: Scope },
   chunkIndex: number,
+  maxSpanChars: number,
   maxRetries = 4,
 ): Promise<SpeechResponse> {
   let delay = 1000;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await generateSpeech({ ...req, chunkIndex });
+      return await generateSpeech({ ...req, chunkIndex, maxSpanChars });
     } catch (err) {
       const code = err instanceof ApiError ? err.code : 'UNKNOWN';
+      if (code === 'TIMEOUT') throw err; // let the ladder step down
       if (attempt >= maxRetries || !RETRYABLE_CODES.has(code)) throw err;
-      // Jitter avoids all workers retrying in lockstep after a 429 burst.
-      await sleep(delay + Math.random() * 400);
+      await sleep(delay + Math.random() * 400); // jitter avoids lockstep retries
       delay = Math.min(delay * 2, 8000);
     }
   }
 }
 
-/**
- * Render a full master by orchestrating per-chunk requests from the browser, so
- * no single serverless call is long enough to time out (enables ~10 min audio).
- *
- * Flow: request chunk 0 -> learn totalChunks -> fan out the remaining chunks
- * with bounded concurrency (each chunk retried on transient failure) -> assemble
- * audio in order. `onProgress(done, total)` fires as chunks complete.
- */
-export async function generateMasterAudio(
-  input: { text: string; voice: VoiceName; persona: PersonaType },
+/** Render the whole master at one fixed span size. Throws on TIMEOUT. */
+async function renderAtSpan(
+  req: { text: string; voice: VoiceName; persona: PersonaType; scope: Scope },
+  maxSpanChars: number,
+  concurrency: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<MasterAudio> {
-  const req = { ...input, scope: 'full' as Scope };
-
-  // First chunk tells us how many there are.
-  const first = await fetchChunkWithRetry(req, 0);
+  // First span tells us how many there are at this size.
+  const first = await fetchSpanWithRetry(req, 0, maxSpanChars);
   const total = first.totalChunks;
   const ordered: string[] = new Array(total);
   ordered[0] = first.audioChunks[0];
@@ -160,8 +169,6 @@ export async function generateMasterAudio(
   let done = 1;
   onProgress?.(done, total);
 
-  // Remaining indices, processed by a small pool of workers. The first failure
-  // that survives all retries aborts the whole render (rejects Promise.all).
   const queue: number[] = [];
   for (let i = 1; i < total; i++) queue.push(i);
 
@@ -169,7 +176,7 @@ export async function generateMasterAudio(
     for (;;) {
       const i = queue.shift();
       if (i === undefined) return;
-      const res = await fetchChunkWithRetry(req, i);
+      const res = await fetchSpanWithRetry(req, i, maxSpanChars);
       ordered[i] = res.audioChunks[0];
       tokens += res.totalTokens ?? 0;
       done += 1;
@@ -177,14 +184,43 @@ export async function generateMasterAudio(
     }
   }
 
-  const pool = Math.min(MASTER_CONCURRENCY, Math.max(1, queue.length));
+  const pool = Math.min(concurrency, Math.max(1, queue.length));
   await Promise.all(Array.from({ length: pool }, () => worker()));
 
-  return {
-    audioChunks: ordered,
-    sampleRate: first.sampleRate,
-    totalTokens: tokens || null,
-  };
+  return { audioChunks: ordered, sampleRate: first.sampleRate, totalTokens: tokens || null };
+}
+
+/**
+ * Render a full master by orchestrating per-span requests from the browser.
+ *
+ * Renders the LARGEST span size that the service can handle, for the fewest
+ * boundaries and the least persona drift. If a span times out (slow service),
+ * automatically re-renders the whole master at the next-smaller span size, so a
+ * healthy service yields drift-minimal audio and a slow one degrades gracefully
+ * instead of failing. `onProgress(done, total)` fires as spans complete (total
+ * may change when the span size steps down).
+ */
+export async function generateMasterAudio(
+  input: { text: string; voice: VoiceName; persona: PersonaType },
+  onProgress?: (done: number, total: number) => void,
+): Promise<MasterAudio> {
+  const req = { ...input, scope: 'full' as Scope };
+
+  let lastErr: unknown;
+  for (let tier = 0; tier < SPAN_LADDER.length; tier++) {
+    const { maxSpanChars, concurrency } = SPAN_LADDER[tier];
+    try {
+      return await renderAtSpan(req, maxSpanChars, concurrency, onProgress);
+    } catch (err) {
+      lastErr = err;
+      const code = err instanceof ApiError ? err.code : 'UNKNOWN';
+      // Only a TIMEOUT is worth retrying at a smaller span; anything else
+      // (quota, bad input, etc.) won't be fixed by smaller spans -> surface it.
+      if (code !== 'TIMEOUT' || tier === SPAN_LADDER.length - 1) throw err;
+      // else: loop to the next (smaller) span tier and re-render.
+    }
+  }
+  throw lastErr;
 }
 
 export interface PrepareResponse {

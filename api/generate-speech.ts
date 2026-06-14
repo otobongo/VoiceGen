@@ -57,18 +57,27 @@ const PREVIEW_SECONDS = 10;
 const RATE_LIMIT = 120;
 const RATE_WINDOW_MS = 60_000;
 
-// Chunk size balances TWO competing failures:
+// Span size balances TWO competing failures:
 //  - too BIG: render time explodes past Vercel's 60s ceiling (measured: 400ch
-//    ~13s, 700ch ~23s, but 750ch occasionally 504'd under load, and ~1000ch+
-//    can blow past 180s and fail).
-//  - too SMALL: every chunk is an independent generation, so the model re-rolls
-//    the accent AND voice character at each boundary -> audible persona drift
-//    between sentences/blocks. Fewer, larger chunks = less drift.
-// 600 chars (~20s render, ~40s audio) keeps a safe margin under 60s even when
-// the service is slow, while cutting the number of boundaries ~33% vs the old
-// 400. The shared seed + low temperature below do the heavy lifting for voice
-// consistency; this just reduces how often the voice is re-rolled.
-const MAX_CHUNK_CHARS = 600;
+//    ~13s, 600ch ~10-12s, 700ch ~23s, ~1000ch+ can blow past 180s and fail).
+//  - too SMALL: every span is an INDEPENDENT model generation, so the model
+//    re-rolls the accent AND voice at each boundary -> audible persona drift.
+//    Fewer, larger spans = less drift.
+// The client renders the LARGEST span that fits (default 900, ~30-40s healthy)
+// and, if a span times out under a slow service, automatically retries the whole
+// render at a smaller span (600, then 400) via the `maxSpanChars` body param.
+// So healthy renders are drift-minimal and slow-service renders degrade
+// gracefully instead of failing. The shared seed (derived from the FULL text, so
+// it is stable even when the span size changes) + low temperature keep the voice
+// consistent across whatever spans we end up with.
+const DEFAULT_MAX_SPAN_CHARS = 900;
+const MIN_SPAN_CHARS = 200;
+const MAX_SPAN_CHARS = 1100; // hard ceiling; bigger risks the 60s wall
+
+// Per-call budget below Vercel's 60s function cap. If the model hasn't returned
+// by this, abort and report a clean TIMEOUT (so the client falls back) rather
+// than letting Vercel kill the function with a plain-text 504.
+const CALL_BUDGET_MS = 52_000;
 
 // Build the prompt sent to the TTS model. Gemini TTS takes style direction as
 // natural-language text, but a "vague" prompt occasionally makes it READ THE
@@ -88,21 +97,78 @@ function buildDirectedPrompt(accentClause: string, chunk: string): string {
   );
 }
 
-// Split text into sentence-aware chunks no longer than maxLen characters.
-function chunkText(text: string, maxLen = MAX_CHUNK_CHARS): string[] {
+// Split a single block into sentence-aware pieces no longer than maxLen.
+function splitSentences(text: string, maxLen: number): string[] {
   const sentences = text.match(/[^.!?\n]+[.!?\n]+|[^.!?\n]+$/g) ?? [text];
-  const chunks: string[] = [];
+  const out: string[] = [];
   let current = '';
   for (const sentence of sentences) {
+    // A single sentence longer than maxLen: hard-split on whitespace as a last
+    // resort so we never exceed the span (and so the call can't run too long).
+    if (sentence.length > maxLen) {
+      if (current.trim()) {
+        out.push(current.trim());
+        current = '';
+      }
+      let rest = sentence;
+      while (rest.length > maxLen) {
+        let cut = rest.lastIndexOf(' ', maxLen);
+        if (cut <= 0) cut = maxLen;
+        out.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut);
+      }
+      current = rest;
+      continue;
+    }
     if (current.length + sentence.length > maxLen && current.length > 0) {
-      chunks.push(current.trim());
+      out.push(current.trim());
       current = '';
     }
     current += sentence;
   }
-  if (current.trim().length > 0) chunks.push(current.trim());
-  // Drop chunks with no speakable characters.
-  return chunks.filter((c) => /[a-z0-9]/i.test(c));
+  if (current.trim().length > 0) out.push(current.trim());
+  return out;
+}
+
+// Split processed text into spans no longer than maxLen, preferring NATURAL
+// boundaries so any voice shift between spans lands on a pause the listener
+// already expects. processTags has turned [break] -> "\n\n" and [pause] -> "\n",
+// so we pack whole blocks (split on blank lines, then single newlines) up to the
+// span size, and only fall back to sentence/word splitting inside an oversize
+// block. Fewer, boundary-aligned spans = far less perceptible persona drift.
+function chunkText(text: string, maxLen = DEFAULT_MAX_SPAN_CHARS): string[] {
+  // Natural blocks: paragraphs ([break]) first, then lines ([pause]).
+  const blocks: string[] = [];
+  for (const para of text.split(/\n{2,}/)) {
+    for (const line of para.split(/\n/)) {
+      if (line.trim()) blocks.push(line.trim());
+    }
+  }
+  if (blocks.length === 0) blocks.push(text);
+
+  const spans: string[] = [];
+  let current = '';
+  for (const block of blocks) {
+    // Oversize block: flush, then sentence-split it into its own spans.
+    if (block.length > maxLen) {
+      if (current.trim()) {
+        spans.push(current.trim());
+        current = '';
+      }
+      for (const piece of splitSentences(block, maxLen)) spans.push(piece);
+      continue;
+    }
+    // Would overflow the current span: start a new one at this natural boundary.
+    if (current.length + block.length + 1 > maxLen && current.length > 0) {
+      spans.push(current.trim());
+      current = '';
+    }
+    current += (current ? ' ' : '') + block;
+  }
+  if (current.trim().length > 0) spans.push(current.trim());
+
+  // Drop spans with no speakable characters.
+  return spans.filter((c) => /[a-z0-9]/i.test(c));
 }
 
 // Low temperature makes the voice render more deterministic, so independent
@@ -122,37 +188,58 @@ function renderSeed(text: string, voice: string, persona: string): number {
   return Math.abs(h) % 2147483647;
 }
 
-// Synthesize a single chunk. The accent direction MUST lead every chunk (not
-// just the first) or the accent is lost partway through a multi-chunk render;
+// Reject with a TIMEOUT-classified error if `promise` hasn't settled by the
+// deadline, so we surface a clean 504 the client can fall back on instead of
+// letting Vercel kill the function with an unparseable plain-text 504.
+function withDeadline<T>(promise: Promise<T>, msLeft: number): Promise<T> {
+  if (msLeft <= 0) return Promise.reject(new Error('TIMEOUT'));
+  // If `promise` settles AFTER the timeout wins the race, swallow its result so
+  // a late rejection doesn't surface as an unhandled promise rejection.
+  promise.catch(() => {});
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('TIMEOUT')), msLeft);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+// Synthesize a single span. The accent direction MUST lead every span (not just
+// the first) or the accent is lost partway through a multi-span render;
 // buildDirectedPrompt wraps it in the leak-resistant labelled format. A shared
-// seed + low temperature keep the voice consistent across chunks.
+// seed + low temperature keep the voice consistent across spans.
 // withRetry handles thrown 429s; the TTS model also intermittently returns a 200
 // with NO audio (especially under throttling), so we additionally retry an empty
-// result a few times with backoff before giving up. Returns the base64 PCM (or
-// undefined if it never produced audio) + tokens.
+// result a few times with backoff. The whole call is bounded by `deadline` (an
+// epoch ms) so it cannot overrun Vercel's function ceiling. Returns the base64
+// PCM (or undefined if it never produced audio) + tokens; throws Error('TIMEOUT')
+// if the deadline passes.
 async function synthesizeChunk(
   ai: ReturnType<typeof getGeminiClient>,
   chunk: string,
   voice: string,
   accentClause: string,
   seed: number,
+  deadline: number,
 ): Promise<{ audio: string | undefined; tokens: number }> {
   const prompt = buildDirectedPrompt(accentClause, chunk);
   const maxEmptyRetries = 3;
   for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
-    const response = await withRetry(() =>
-      ai.models.generateContent({
-        model: TTS_MODEL,
-        contents: [{ parts: [{ text: prompt }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          temperature: TTS_TEMPERATURE,
-          seed,
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+    const response = await withDeadline(
+      withRetry(() =>
+        ai.models.generateContent({
+          model: TTS_MODEL,
+          contents: [{ parts: [{ text: prompt }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            temperature: TTS_TEMPERATURE,
+            seed,
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+            },
           },
-        },
-      }),
+        }),
+      ),
+      deadline - Date.now(),
     );
     const audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     const tokens = response.usageMetadata?.totalTokenCount ?? 0;
@@ -192,12 +279,18 @@ export default async function handler(
   const text = typeof body.text === 'string' ? body.text : '';
   const { voice, persona } = body;
   const scope = body.scope === 'full' ? 'full' : 'preview';
-  // For full scope, the client requests one chunk at a time. Default to 0 so a
-  // caller that omits it still gets the first chunk (and learns totalChunks).
+  // For full scope, the client requests one span at a time. Default to 0 so a
+  // caller that omits it still gets the first span (and learns totalChunks).
   const requestedChunk =
     typeof body.chunkIndex === 'number' && Number.isInteger(body.chunkIndex)
       ? body.chunkIndex
       : 0;
+  // Span size is client-controlled so it can retry the whole render at a smaller
+  // size if a big span times out. Clamp to a safe range.
+  const maxSpanChars =
+    typeof body.maxSpanChars === 'number' && Number.isFinite(body.maxSpanChars)
+      ? Math.min(MAX_SPAN_CHARS, Math.max(MIN_SPAN_CHARS, Math.floor(body.maxSpanChars)))
+      : DEFAULT_MAX_SPAN_CHARS;
 
   if (!text.trim()) {
     res.status(400).json({ error: 'EMPTY_TEXT' });
@@ -226,11 +319,11 @@ export default async function handler(
     }
   }
 
-  // Process tags ONCE on the whole script (persona-free), then chunk. The
-  // persona/accent prefix is applied per chunk at synthesis time so the accent
-  // persists across every chunk, not just the first.
+  // Process tags ONCE on the whole script (persona-free), then split into spans
+  // at natural boundaries (up to maxSpanChars). The persona/accent prefix is
+  // applied per span at synthesis time so the accent persists across every span.
   const optimizedText = processTags(rawText);
-  const chunks = chunkText(optimizedText);
+  const chunks = chunkText(optimizedText, maxSpanChars);
   if (chunks.length === 0) {
     res.status(400).json({ error: 'EMPTY_TEXT' });
     return;
@@ -253,13 +346,24 @@ export default async function handler(
   // render shares it -> consistent voice across the whole master.
   const accentClause = personaClause(persona);
   const seed = renderSeed(text, voice as string, persona as string);
+  // Bound the whole request below Vercel's 60s cap so a slow span returns a
+  // clean TIMEOUT (triggering the client's smaller-span fallback) instead of an
+  // unparseable plain-text 504.
+  const deadline = Date.now() + CALL_BUDGET_MS;
   try {
     const ai = getGeminiClient();
     const audioChunks: string[] = [];
     let totalTokens = 0;
 
     for (const chunk of targetChunks) {
-      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice, accentClause, seed);
+      const { audio, tokens } = await synthesizeChunk(
+        ai,
+        chunk,
+        voice,
+        accentClause,
+        seed,
+        deadline,
+      );
       if (!audio) {
         res.status(502).json({ error: 'NO_AUDIO' });
         return;
@@ -277,6 +381,12 @@ export default async function handler(
       totalChunks: chunks.length,
     });
   } catch (error) {
+    // Our own deadline guard -> clean TIMEOUT (504) the client falls back on.
+    if (error instanceof Error && error.message === 'TIMEOUT') {
+      console.error('[generate-speech] TIMEOUT (span too slow)');
+      res.status(504).json({ error: 'TIMEOUT' });
+      return;
+    }
     const { status, code } = classifyError(error);
     // Log server-side for diagnostics; never echo raw upstream errors out.
     console.error('[generate-speech]', code, error);
