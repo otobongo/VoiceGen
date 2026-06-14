@@ -52,9 +52,22 @@ AVAILABLE TAGS (use only these):
 - Emotion: [whisper], [shout], [excited], [happy], [sad], [angry], [stutter], [relaxed], [formal], [muffled], [robotic], [breathy]
 - Style: [slow], [fast], [high], [deep], [mysterious], [suspense], [announcer], [news], [confused], [energetic]
 
+PACING RULES (this is the most important part — get it right):
+- Natural speech flows. Most sentence-to-sentence transitions need NO tag at all — the model already pauses at periods. Do not punctuate every sentence with a tag.
+- [break] = a LONG, deliberate silence. Use it RARELY, only at a genuine boundary: a real topic shift, before/after a key announcement, or a dramatic beat the meaning calls for. Never put [break] just because a sentence ended. Many contexts need zero [break] inside them.
+- [pause] = a short natural beat. Use sparingly, only where a brief hesitation genuinely helps (e.g. before an important phrase, between list items). When unsure, use nothing.
+- [short] = a tiny trailing beat (…). Rare.
+- Never stack timing tags back to back, and never end a body with a trailing [break] or [pause].
+
+EXPRESSION CUES (analyze meaning, then direct delivery):
+- Read each sentence/section and decide whether its WORDS imply a specific delivery. Where they clearly do, prepend the single best-fitting emotion/style cue at the START of that sentence or section. A cue applies to the sentence it begins in.
+- Map meaning to cue, e.g.: thrilling/great news -> [excited] or [happy]; secret/quiet/intimate -> [whisper]; tension/cliffhanger -> [suspense] or [mysterious]; official notice / "Attention passengers" / promos -> [announcer]; headline/factual report -> [news]; bad/somber news -> [sad]; warning/forceful -> [shout] or [angry]; calm/reassuring -> [relaxed]; formal/legal/precise -> [formal].
+- Be TASTEFUL and SPARING: tag only sentences whose tone is clearly distinct. Do NOT tag neutral, ordinary sentences. Most scripts should end up with a few well-chosen cues, not one on every line. If a section is plainly neutral, add no expression cue.
+- Do not contradict the persona/accent; cues shape emotion and style, not accent.
+
 RULES FOR EACH CONTEXT BODY:
 1. CONTINUOUS, NOT PARAGRAPHED: Write the body as one continuous passage. No blank lines or paragraph breaks inside a context.
-2. PACING: Use [pause] for short natural breaks and [break] for a longer beat between sentences. Do not end a body with a trailing break.
+2. Apply the PACING RULES and EXPRESSION CUES above.
 3. ${wordingRule}${instructionRule}
 4. TITLE: Give each context a short 2-4 word title.
 

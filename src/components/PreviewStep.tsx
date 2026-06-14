@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { ArrowLeft, ArrowRight, Layers, Loader2, Volume2 } from 'lucide-react';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
@@ -6,7 +7,10 @@ import { VoicePicker } from './VoicePicker';
 import { ExpressionPalette } from './ExpressionPalette';
 import { AudioPlayer } from './AudioPlayer';
 import { FontSizeControl } from './FontSizeControl';
-import { HighlightedTextarea } from './HighlightedTextarea';
+import {
+  HighlightedTextarea,
+  type HighlightedTextareaHandle,
+} from './HighlightedTextarea';
 import type { StudioApi } from '@/hooks/useStudio';
 import type { EditorFontSize } from '@/hooks/useEditorFontSize';
 
@@ -19,7 +23,6 @@ export function PreviewStep({ studio, font }: PreviewStepProps) {
   const {
     text,
     setText,
-    insertTag,
     voice,
     setVoice,
     persona,
@@ -36,6 +39,8 @@ export function PreviewStep({ studio, font }: PreviewStepProps) {
     goToStep,
     isValid,
   } = studio;
+
+  const editorRef = useRef<HighlightedTextareaHandle>(null);
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 lg:flex-row lg:overflow-hidden">
@@ -59,6 +64,7 @@ export function PreviewStep({ studio, font }: PreviewStepProps) {
 
         <div className="relative min-h-[200px] flex-1">
           <HighlightedTextarea
+            ref={editorRef}
             value={text}
             onChange={setText}
             fontSize={font.size}
@@ -66,7 +72,9 @@ export function PreviewStep({ studio, font }: PreviewStepProps) {
         </div>
 
         <div className="border-t border-border bg-subtle/50 px-4 py-3">
-          <ExpressionPalette onInsert={insertTag} />
+          <ExpressionPalette
+            onInsert={(tag) => editorRef.current?.insertAtCursor(tag)}
+          />
         </div>
       </div>
 

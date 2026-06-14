@@ -287,13 +287,6 @@ export function useStudio(options: StudioOptions = {}) {
     }
   }, [text, voice, persona, speed, isValid, isGenerating, onMasterRendered]);
 
-  const insertTag = useCallback(
-    (tag: string) => {
-      updateText(text.length === 0 ? tag : `${text} ${tag}`);
-    },
-    [text, updateText],
-  );
-
   // Build a speed-baked WAV for download. Returns null on failure AND surfaces a
   // meaningful error banner, so a failed export is never silent. Two distinct
   // failure modes: the take's decoded audio is gone (NO_AUDIO_TO_EXPORT), or WAV
@@ -333,7 +326,6 @@ export function useStudio(options: StudioOptions = {}) {
     setPersona: setPersonaChecked,
     setSpeed,
     setReviewCopy,
-    insertTag,
     // validation
     charCount,
     overLimit,

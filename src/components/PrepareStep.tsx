@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowRight, CheckCheck, Loader2, WandSparkles } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
 import { PreparedResult } from './PreparedResult';
 import { AuditPanel } from './AuditPanel';
+import { ExpressionPalette } from './ExpressionPalette';
 import { FontSizeControl } from './FontSizeControl';
-import { HighlightedTextarea } from './HighlightedTextarea';
+import {
+  HighlightedTextarea,
+  type HighlightedTextareaHandle,
+} from './HighlightedTextarea';
 import type { StudioApi } from '@/hooks/useStudio';
 import type { EditorFontSize } from '@/hooks/useEditorFontSize';
 
@@ -35,6 +39,7 @@ export function PrepareStep({ studio, font }: PrepareStepProps) {
   } = studio;
 
   const [directive, setDirective] = useState('');
+  const editorRef = useRef<HighlightedTextareaHandle>(null);
   const nearLimit = charCount > maxChars * 0.9;
 
   const runDirective = () => {
@@ -65,6 +70,7 @@ export function PrepareStep({ studio, font }: PrepareStepProps) {
 
         <div className="relative flex-1">
           <HighlightedTextarea
+            ref={editorRef}
             value={text}
             onChange={setText}
             fontSize={font.size}
@@ -79,6 +85,13 @@ export function PrepareStep({ studio, font }: PrepareStepProps) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Manual expression cues (insert at the caret) */}
+        <div className="border-t border-border bg-subtle/50 px-4 py-3">
+          <ExpressionPalette
+            onInsert={(tag) => editorRef.current?.insertAtCursor(tag)}
+          />
         </div>
 
         {/* Copy-prep controls */}

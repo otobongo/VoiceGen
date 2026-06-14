@@ -67,9 +67,11 @@ export interface ScriptChange {
   reason: string;
 }
 
-// Joining cue placed between contexts so the spoken master has a clear,
-// audible boundary between one context and the next.
-export const CONTEXT_SEPARATOR = '\n\n[break]\n\n';
+// Joining cue placed between contexts so the spoken master has an audible
+// boundary between one context and the next, without the long, cut-off silence
+// of a [break]. A single [pause] reads as a natural beat; the AI reserves
+// [break] for the rare dramatic boundary inside a body.
+export const CONTEXT_SEPARATOR = '\n[pause]\n';
 
 /** Compose detected contexts back into one script with breaks between them. */
 export function composeContexts(contexts: ScriptContext[]): string {

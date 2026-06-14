@@ -1,4 +1,9 @@
-import React, { useRef } from 'react';
+import React, {
+  forwardRef,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+} from 'react';
 import { cn } from '@/lib/cn';
 
 interface HighlightedTextareaProps {
@@ -9,6 +14,12 @@ interface HighlightedTextareaProps {
   placeholder?: string;
   ariaLabel?: string;
   className?: string;
+}
+
+/** Imperative handle so parents can insert a tag at the live caret position. */
+export interface HighlightedTextareaHandle {
+  /** Insert `snippet` at the caret (replacing any selection), then refocus. */
+  insertAtCursor: (snippet: string) => void;
 }
 
 // Render the script with [prosody tags] highlighted. Used by the transparent
@@ -36,16 +47,61 @@ function renderHighlighted(text: string): React.ReactNode {
  * textarea sits over a styled backdrop that mirrors the same text; the two
  * share identical typography/padding so they align exactly. Scroll is synced.
  */
-export function HighlightedTextarea({
-  value,
-  onChange,
-  fontSize,
-  disabled,
-  placeholder,
-  ariaLabel = 'Script text',
-  className,
-}: HighlightedTextareaProps) {
+export const HighlightedTextarea = forwardRef<
+  HighlightedTextareaHandle,
+  HighlightedTextareaProps
+>(function HighlightedTextarea(
+  {
+    value,
+    onChange,
+    fontSize,
+    disabled,
+    placeholder,
+    ariaLabel = 'Script text',
+    className,
+  },
+  ref,
+) {
   const backdropRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Caret to restore AFTER the next controlled value update (set by insertAtCursor).
+  const pendingCaret = useRef<number | null>(null);
+
+  // Insert a snippet at the caret. We separate words with single spaces so cues
+  // read naturally: e.g. "...hello [happy] world" not "...hello[happy]world".
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertAtCursor(snippet: string) {
+        const el = textareaRef.current;
+        // Fall back to end-of-text if the field was never focused.
+        const start = el ? el.selectionStart : value.length;
+        const end = el ? el.selectionEnd : value.length;
+
+        const before = value.slice(0, start);
+        const after = value.slice(end);
+        const needsLeadSpace = before.length > 0 && !/\s$/.test(before);
+        const needsTrailSpace = after.length > 0 && !/^\s/.test(after);
+        const insert =
+          (needsLeadSpace ? ' ' : '') + snippet + (needsTrailSpace ? ' ' : '');
+
+        pendingCaret.current = (before + insert).length;
+        onChange(before + insert + after);
+      },
+    }),
+    [value, onChange],
+  );
+
+  // After the inserted value renders, restore focus + caret right after the tag.
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null) return;
+    const el = textareaRef.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(pendingCaret.current, pendingCaret.current);
+    }
+    pendingCaret.current = null;
+  }, [value]);
 
   // Both layers MUST share these exact metrics to stay aligned.
   const shared: React.CSSProperties = {
@@ -75,6 +131,7 @@ export function HighlightedTextarea({
         )}
       </div>
       <textarea
+        ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onScroll={(e) => {
@@ -93,4 +150,4 @@ export function HighlightedTextarea({
       />
     </div>
   );
-}
+});
