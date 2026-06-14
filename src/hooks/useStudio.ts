@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
   auditScript,
+  generateMasterAudio,
   generateSpeech,
   prepareCopy as prepareCopyApi,
 } from '@/lib/api';
@@ -58,6 +59,10 @@ export function useStudio(options: StudioOptions = {}) {
   const [isPreparing, setIsPreparing] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  // Master render progress: chunks completed vs. total (null when not running).
+  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
   const [error, setError] = useState<StudioError | null>(null);
   const [improvement, setImprovement] = useState<AIImprovement | null>(null);
   const [contexts, setContexts] = useState<ScriptContext[]>([]);
@@ -254,9 +259,15 @@ export function useStudio(options: StudioOptions = {}) {
   const generateMaster = useCallback(async () => {
     if (!isValid || isGenerating) return;
     setIsGenerating(true);
+    setGenProgress(null);
     setError(null);
     try {
-      const res = await generateSpeech({ text, voice, persona, scope: 'full' });
+      // Browser-orchestrated: one short request per ~1000-char chunk, assembled
+      // here. No single call hits the 60s function ceiling, so long (up to ~10
+      // min) renders complete without timing out.
+      const res = await generateMasterAudio({ text, voice, persona }, (done, total) =>
+        setGenProgress({ done, total }),
+      );
       if (res.totalTokens) setSessionTokens((t) => t + res.totalTokens!);
       const decoded = decodeGeminiAudio(res.audioChunks, res.sampleRate);
       const take = makeTake(decoded, { voice, persona, scope: 'full', speed });
@@ -272,6 +283,7 @@ export function useStudio(options: StudioOptions = {}) {
       return null;
     } finally {
       setIsGenerating(false);
+      setGenProgress(null);
     }
   }, [text, voice, persona, speed, isValid, isGenerating, onMasterRendered]);
 
@@ -333,6 +345,7 @@ export function useStudio(options: StudioOptions = {}) {
     isPreparing,
     isPreviewing,
     isGenerating,
+    genProgress,
     isAuditing,
     error,
     improvement,

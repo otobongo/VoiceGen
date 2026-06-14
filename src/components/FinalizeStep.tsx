@@ -29,6 +29,7 @@ export function FinalizeStep({ studio }: FinalizeStepProps) {
     charCount,
     masterTake,
     isGenerating,
+    genProgress,
     generateMaster,
     exportTake,
     error,
@@ -123,14 +124,37 @@ export function FinalizeStep({ studio }: FinalizeStepProps) {
           >
             {isGenerating ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {genProgress && genProgress.total > 1
+                  ? `Generating ${genProgress.done} of ${genProgress.total}…`
+                  : 'Generating…'}
               </>
             ) : (
               <>{masterTake ? 'Regenerate master' : 'Generate'}</>
             )}
           </Button>
+
+          {isGenerating && genProgress && genProgress.total > 1 && (
+            <div
+              className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-border"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={genProgress.total}
+              aria-valuenow={genProgress.done}
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${(genProgress.done / genProgress.total) * 100}%` }}
+              />
+            </div>
+          )}
+
           <p className="sr-only" role="status" aria-live="polite">
-            {isGenerating ? 'Generating the full master, please wait.' : ''}
+            {isGenerating
+              ? genProgress && genProgress.total > 1
+                ? `Generating part ${genProgress.done} of ${genProgress.total}.`
+                : 'Generating the full master, please wait.'
+              : ''}
           </p>
         </div>
 

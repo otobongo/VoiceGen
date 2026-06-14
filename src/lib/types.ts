@@ -192,7 +192,9 @@ export interface Take {
   label: string;
 }
 
-export const MAX_TEXT_LENGTH = 5000;
+// Keep in sync with api/_shared/voice.ts. ~10000 chars covers a ~10-12 min
+// master render (rendered one chunk per request, so it never times out).
+export const MAX_TEXT_LENGTH = 10000;
 
 // Human-readable copy for each server error code.
 export const ERROR_MESSAGES: Record<string, string> = {
@@ -215,6 +217,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   TEXT_TOO_LONG: `Your script is over the ${MAX_TEXT_LENGTH.toLocaleString()} character limit.`,
   INVALID_VOICE: 'That voice is not available. Pick another.',
   INVALID_PERSONA: 'That accent is not available. Pick another.',
+  BAD_CHUNK: 'A part of the render was out of range. Please regenerate.',
+  TIMEOUT:
+    'That part took too long and timed out. Try again, or shorten the script slightly.',
   NETWORK: 'Could not reach the server. Check your connection and try again.',
   UNKNOWN: 'Something went wrong. Please try again.',
 };

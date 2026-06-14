@@ -49,8 +49,10 @@ export const PERSONA_PROMPTS: Record<PersonaType, string> = {
 };
 
 // Maximum characters accepted in a single request. Guards against
-// pathologically large (and expensive) generations.
-export const MAX_TEXT_LENGTH = 5000;
+// pathologically large (and expensive) generations. At ~2.5 words/sec this
+// covers roughly a 10-12 minute master render (synthesized one chunk per
+// function invocation, so no single call is long enough to time out).
+export const MAX_TEXT_LENGTH = 10000;
 
 // Prosody tags that wrap a single sentence with a delivery instruction.
 const SCOPED_TAGS: { tag: string; instruction: string }[] = [

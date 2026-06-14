@@ -58,7 +58,10 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
       const data = (await res.json()) as { error?: string };
       if (data?.error) code = data.error;
     } catch {
-      /* non-JSON error body */
+      // Non-JSON error body. A 504 here is a Vercel function timeout
+      // (plain-text "FUNCTION_INVOCATION_TIMEOUT"); surface it honestly rather
+      // than as the generic "something went wrong".
+      if (res.status === 504 || res.status === 408) code = 'TIMEOUT';
     }
     throw new ApiError(code, res.status);
   }
@@ -71,15 +74,81 @@ export interface SpeechResponse {
   sampleRate: number;
   scope: Scope;
   totalTokens: number | null;
+  chunkIndex: number;
+  totalChunks: number;
 }
 
+/**
+ * Single TTS request. For `scope: 'preview'` this returns the whole (short)
+ * preview. For `scope: 'full'` it returns ONE chunk (`chunkIndex`) plus
+ * `totalChunks`; the browser orchestrates the rest (see generateMasterAudio).
+ */
 export function generateSpeech(input: {
   text: string;
   voice: VoiceName;
   persona: PersonaType;
   scope: Scope;
+  chunkIndex?: number;
 }): Promise<SpeechResponse> {
   return postJson<SpeechResponse>('/api/generate-speech', input);
+}
+
+export interface MasterAudio {
+  audioChunks: string[]; // ordered base64 PCM, ready to concatenate
+  sampleRate: number;
+  totalTokens: number | null;
+}
+
+/** How many chunk requests run at once. Balances speed vs. upstream throttling. */
+const MASTER_CONCURRENCY = 3;
+
+/**
+ * Render a full master by orchestrating per-chunk requests from the browser, so
+ * no single serverless call is long enough to time out (enables ~10 min audio).
+ *
+ * Flow: request chunk 0 -> learn totalChunks -> fan out the remaining chunks
+ * with bounded concurrency -> assemble audio in order. `onProgress(done, total)`
+ * fires as chunks complete so the UI can show progress.
+ */
+export async function generateMasterAudio(
+  input: { text: string; voice: VoiceName; persona: PersonaType },
+  onProgress?: (done: number, total: number) => void,
+): Promise<MasterAudio> {
+  const req = { ...input, scope: 'full' as Scope };
+
+  // First chunk tells us how many there are.
+  const first = await generateSpeech({ ...req, chunkIndex: 0 });
+  const total = first.totalChunks;
+  const ordered: string[] = new Array(total);
+  ordered[0] = first.audioChunks[0];
+  let tokens = first.totalTokens ?? 0;
+  let done = 1;
+  onProgress?.(done, total);
+
+  // Remaining indices, processed by a small pool of workers.
+  const queue: number[] = [];
+  for (let i = 1; i < total; i++) queue.push(i);
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = queue.shift();
+      if (i === undefined) return;
+      const res = await generateSpeech({ ...req, chunkIndex: i });
+      ordered[i] = res.audioChunks[0];
+      tokens += res.totalTokens ?? 0;
+      done += 1;
+      onProgress?.(done, total);
+    }
+  }
+
+  const pool = Math.min(MASTER_CONCURRENCY, Math.max(1, queue.length));
+  await Promise.all(Array.from({ length: pool }, () => worker()));
+
+  return {
+    audioChunks: ordered,
+    sampleRate: first.sampleRate,
+    totalTokens: tokens || null,
+  };
 }
 
 export interface PrepareResponse {
