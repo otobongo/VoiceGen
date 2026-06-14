@@ -113,6 +113,17 @@ export function personaPrefix(persona: PersonaType): string {
 }
 
 /**
+ * The accent/style direction as a clean SENTENCE (no trailing ": "), for use
+ * inside a labelled "Voice direction:" preamble. Empty for "neutral".
+ */
+export function personaClause(persona: PersonaType): string {
+  const raw = (PERSONA_PROMPTS[persona] ?? '').trim();
+  if (!raw) return '';
+  // Drop a trailing colon (the legacy "...: " join) and end as a sentence.
+  return raw.replace(/\s*:\s*$/, '.').replace(/([^.!?])$/, '$1.');
+}
+
+/**
  * Convert tag markup to delivery instructions and prepend the persona. Kept for
  * single-shot callers (e.g. the standalone TTS API). The chunked master path in
  * generate-speech.ts instead processes tags once and prepends personaPrefix to

@@ -29,7 +29,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Modality } from '@google/genai';
 import {
   MAX_TEXT_LENGTH,
-  personaPrefix,
+  personaClause,
   processTags,
   isValidVoice,
   isValidPersona,
@@ -64,10 +64,23 @@ const RATE_WINDOW_MS = 60_000;
 // service is slow, so no single per-chunk invocation times out.
 const MAX_CHUNK_CHARS = 400;
 
-// Prepended to every chunk to hold a consistent tempo.
-const STEADY_PACE =
-  'CRITICAL INSTRUCTION: Speak at a very steady, consistent, and moderate pace. ' +
-  'Do NOT speed up or rush at any point. Maintain a natural, even rhythm throughout. ';
+// Build the prompt sent to the TTS model. Gemini TTS takes style direction as
+// natural-language text, but a "vague" prompt occasionally makes it READ THE
+// DIRECTION ALOUD (the "Critical Instructions" leak). Per Google's TTS guidance,
+// we minimize that by using a clearly LABELLED preamble, an explicit content
+// delimiter, and an instruction to speak only the transcript. Direction is still
+// upheld (accent + steady pace); it just isn't voiced.
+//   accentClause: short accent/style sentence (may be empty for neutral).
+//   chunk:        the words to actually speak.
+function buildDirectedPrompt(accentClause: string, chunk: string): string {
+  const direction =
+    (accentClause ? accentClause + ' ' : '') +
+    'Maintain a steady, even, natural pace throughout, and do not rush.';
+  return (
+    `Voice direction: ${direction} Speak ONLY the transcript text below; ` +
+    `do not read this direction aloud.\nTranscript:\n${chunk}`
+  );
+}
 
 // Split text into sentence-aware chunks no longer than maxLen characters.
 function chunkText(text: string, maxLen = MAX_CHUNK_CHARS): string[] {
@@ -86,9 +99,9 @@ function chunkText(text: string, maxLen = MAX_CHUNK_CHARS): string[] {
   return chunks.filter((c) => /[a-z0-9]/i.test(c));
 }
 
-// Synthesize a single chunk. The persona prefix MUST lead every chunk (not just
-// the first) or the accent is lost partway through a multi-chunk render. Order:
-// accent instruction -> steady-pace instruction -> the chunk text.
+// Synthesize a single chunk. The accent direction MUST lead every chunk (not
+// just the first) or the accent is lost partway through a multi-chunk render;
+// buildDirectedPrompt wraps it in the leak-resistant labelled format.
 // withRetry handles thrown 429s; the TTS model also intermittently returns a 200
 // with NO audio (especially under throttling), so we additionally retry an empty
 // result a few times with backoff before giving up. Returns the base64 PCM (or
@@ -97,9 +110,9 @@ async function synthesizeChunk(
   ai: ReturnType<typeof getGeminiClient>,
   chunk: string,
   voice: string,
-  accentPrefix: string,
+  accentClause: string,
 ): Promise<{ audio: string | undefined; tokens: number }> {
-  const prompt = accentPrefix + STEADY_PACE + chunk;
+  const prompt = buildDirectedPrompt(accentClause, chunk);
   const maxEmptyRetries = 3;
   for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
     const response = await withRetry(() =>
@@ -207,15 +220,16 @@ export default async function handler(
   const targetChunks = scope === 'full' ? [chunks[requestedChunk]] : chunks;
 
   // ---- Synthesize the target chunk(s) (accent + steady pace), collect audio --
-  // The accent prefix leads every chunk so the persona never resets mid-render.
-  const accentPrefix = personaPrefix(persona);
+  // The accent clause leads every chunk so the persona never resets mid-render,
+  // wrapped in the leak-resistant labelled prompt so it isn't read aloud.
+  const accentClause = personaClause(persona);
   try {
     const ai = getGeminiClient();
     const audioChunks: string[] = [];
     let totalTokens = 0;
 
     for (const chunk of targetChunks) {
-      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice, accentPrefix);
+      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice, accentClause);
       if (!audio) {
         res.status(502).json({ error: 'NO_AUDIO' });
         return;
