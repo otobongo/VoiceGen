@@ -51,18 +51,22 @@ const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 const WORDS_PER_SECOND = 2.5;
 const PREVIEW_SECONDS = 10;
 
-// Rate limit: generation is the expensive path, but a single long render now
-// fans out into one request per ~400-char chunk (roughly 25-30 for a 10-min
-// script). Budget enough for a long render plus headroom per IP.
+// Rate limit: generation is the expensive path, but a single long render fans
+// out into one request per chunk (~12 for a 10-min script at the size below).
+// Budget enough for a long render plus headroom per IP.
 const RATE_LIMIT = 120;
 const RATE_WINDOW_MS = 60_000;
 
-// Keep each TTS request SHORT for two reasons: (1) the model can't accelerate
-// over a long run (anti-drift), and (2) Gemini TTS latency is highly variable
-// and a ~1000-char chunk can occasionally exceed Vercel's 60s function ceiling.
-// ~400 chars is ~25-30s of audio, which renders well under 60s even when the
-// service is slow, so no single per-chunk invocation times out.
-const MAX_CHUNK_CHARS = 400;
+// Chunk size balances TWO competing failures:
+//  - too BIG: render time explodes past Vercel's 60s ceiling (measured: ~700
+//    chars renders in ~23s, but ~1000+ chars can blow past 180s and fail).
+//  - too SMALL: every chunk is an independent generation, so the model re-rolls
+//    the accent AND voice character at each boundary -> audible persona drift
+//    between sentences/blocks. Fewer, larger chunks = far less drift.
+// ~750 chars (~50s of audio, ~25s render) is the largest size that still renders
+// well under 60s with margin, while roughly halving the number of boundaries vs.
+// the old 400, which is what keeps the persona consistent across a long script.
+const MAX_CHUNK_CHARS = 750;
 
 // Build the prompt sent to the TTS model. Gemini TTS takes style direction as
 // natural-language text, but a "vague" prompt occasionally makes it READ THE
@@ -99,9 +103,27 @@ function chunkText(text: string, maxLen = MAX_CHUNK_CHARS): string[] {
   return chunks.filter((c) => /[a-z0-9]/i.test(c));
 }
 
+// Low temperature makes the voice render more deterministic, so independent
+// chunk calls produce a more consistent voice/accent (less drift). A fixed seed
+// shared across all chunks of one render anchors them to the same realization.
+const TTS_TEMPERATURE = 0.55;
+
+// Stable seed derived from the render's identity (text+voice+persona) so every
+// chunk of the SAME script uses the same seed -> mutually consistent voice.
+function renderSeed(text: string, voice: string, persona: string): number {
+  let h = 2166136261;
+  const s = `${voice}|${persona}|${text}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h) % 2147483647;
+}
+
 // Synthesize a single chunk. The accent direction MUST lead every chunk (not
 // just the first) or the accent is lost partway through a multi-chunk render;
-// buildDirectedPrompt wraps it in the leak-resistant labelled format.
+// buildDirectedPrompt wraps it in the leak-resistant labelled format. A shared
+// seed + low temperature keep the voice consistent across chunks.
 // withRetry handles thrown 429s; the TTS model also intermittently returns a 200
 // with NO audio (especially under throttling), so we additionally retry an empty
 // result a few times with backoff before giving up. Returns the base64 PCM (or
@@ -111,6 +133,7 @@ async function synthesizeChunk(
   chunk: string,
   voice: string,
   accentClause: string,
+  seed: number,
 ): Promise<{ audio: string | undefined; tokens: number }> {
   const prompt = buildDirectedPrompt(accentClause, chunk);
   const maxEmptyRetries = 3;
@@ -121,6 +144,8 @@ async function synthesizeChunk(
         contents: [{ parts: [{ text: prompt }] }],
         config: {
           responseModalities: [Modality.AUDIO],
+          temperature: TTS_TEMPERATURE,
+          seed,
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
           },
@@ -221,15 +246,18 @@ export default async function handler(
 
   // ---- Synthesize the target chunk(s) (accent + steady pace), collect audio --
   // The accent clause leads every chunk so the persona never resets mid-render,
-  // wrapped in the leak-resistant labelled prompt so it isn't read aloud.
+  // wrapped in the leak-resistant labelled prompt so it isn't read aloud. The
+  // seed is derived from the WHOLE script (not the chunk) so every chunk of one
+  // render shares it -> consistent voice across the whole master.
   const accentClause = personaClause(persona);
+  const seed = renderSeed(text, voice as string, persona as string);
   try {
     const ai = getGeminiClient();
     const audioChunks: string[] = [];
     let totalTokens = 0;
 
     for (const chunk of targetChunks) {
-      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice, accentClause);
+      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice, accentClause, seed);
       if (!audio) {
         res.status(502).json({ error: 'NO_AUDIO' });
         return;
