@@ -99,16 +99,51 @@ export interface MasterAudio {
   totalTokens: number | null;
 }
 
-/** How many chunk requests run at once. Balances speed vs. upstream throttling. */
-const MASTER_CONCURRENCY = 3;
+// How many chunk requests run at once. Kept low: firing many concurrent TTS
+// calls makes the upstream model throttle (429) and intermittently fail (502),
+// so a gentle pace plus per-chunk retries is far more reliable than brute speed.
+const MASTER_CONCURRENCY = 2;
+
+// Transient per-chunk failures worth retrying (vs. a bad request we shouldn't).
+const RETRYABLE_CODES = new Set([
+  'RATE_LIMITED',
+  'QUOTA_EXHAUSTED',
+  'NO_AUDIO',
+  'UPSTREAM_ERROR',
+  'TIMEOUT',
+  'NETWORK',
+  'UNKNOWN',
+]);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Fetch a single chunk, retrying transient failures with exponential backoff. */
+async function fetchChunkWithRetry(
+  req: { text: string; voice: VoiceName; persona: PersonaType; scope: Scope },
+  chunkIndex: number,
+  maxRetries = 4,
+): Promise<SpeechResponse> {
+  let delay = 1000;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await generateSpeech({ ...req, chunkIndex });
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : 'UNKNOWN';
+      if (attempt >= maxRetries || !RETRYABLE_CODES.has(code)) throw err;
+      // Jitter avoids all workers retrying in lockstep after a 429 burst.
+      await sleep(delay + Math.random() * 400);
+      delay = Math.min(delay * 2, 8000);
+    }
+  }
+}
 
 /**
  * Render a full master by orchestrating per-chunk requests from the browser, so
  * no single serverless call is long enough to time out (enables ~10 min audio).
  *
  * Flow: request chunk 0 -> learn totalChunks -> fan out the remaining chunks
- * with bounded concurrency -> assemble audio in order. `onProgress(done, total)`
- * fires as chunks complete so the UI can show progress.
+ * with bounded concurrency (each chunk retried on transient failure) -> assemble
+ * audio in order. `onProgress(done, total)` fires as chunks complete.
  */
 export async function generateMasterAudio(
   input: { text: string; voice: VoiceName; persona: PersonaType },
@@ -117,7 +152,7 @@ export async function generateMasterAudio(
   const req = { ...input, scope: 'full' as Scope };
 
   // First chunk tells us how many there are.
-  const first = await generateSpeech({ ...req, chunkIndex: 0 });
+  const first = await fetchChunkWithRetry(req, 0);
   const total = first.totalChunks;
   const ordered: string[] = new Array(total);
   ordered[0] = first.audioChunks[0];
@@ -125,7 +160,8 @@ export async function generateMasterAudio(
   let done = 1;
   onProgress?.(done, total);
 
-  // Remaining indices, processed by a small pool of workers.
+  // Remaining indices, processed by a small pool of workers. The first failure
+  // that survives all retries aborts the whole render (rejects Promise.all).
   const queue: number[] = [];
   for (let i = 1; i < total; i++) queue.push(i);
 
@@ -133,7 +169,7 @@ export async function generateMasterAudio(
     for (;;) {
       const i = queue.shift();
       if (i === undefined) return;
-      const res = await generateSpeech({ ...req, chunkIndex: i });
+      const res = await fetchChunkWithRetry(req, i);
       ordered[i] = res.audioChunks[0];
       tokens += res.totalTokens ?? 0;
       done += 1;
