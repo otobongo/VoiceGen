@@ -58,15 +58,17 @@ const RATE_LIMIT = 120;
 const RATE_WINDOW_MS = 60_000;
 
 // Chunk size balances TWO competing failures:
-//  - too BIG: render time explodes past Vercel's 60s ceiling (measured: ~700
-//    chars renders in ~23s, but ~1000+ chars can blow past 180s and fail).
+//  - too BIG: render time explodes past Vercel's 60s ceiling (measured: 400ch
+//    ~13s, 700ch ~23s, but 750ch occasionally 504'd under load, and ~1000ch+
+//    can blow past 180s and fail).
 //  - too SMALL: every chunk is an independent generation, so the model re-rolls
 //    the accent AND voice character at each boundary -> audible persona drift
-//    between sentences/blocks. Fewer, larger chunks = far less drift.
-// ~750 chars (~50s of audio, ~25s render) is the largest size that still renders
-// well under 60s with margin, while roughly halving the number of boundaries vs.
-// the old 400, which is what keeps the persona consistent across a long script.
-const MAX_CHUNK_CHARS = 750;
+//    between sentences/blocks. Fewer, larger chunks = less drift.
+// 600 chars (~20s render, ~40s audio) keeps a safe margin under 60s even when
+// the service is slow, while cutting the number of boundaries ~33% vs the old
+// 400. The shared seed + low temperature below do the heavy lifting for voice
+// consistency; this just reduces how often the voice is re-rolled.
+const MAX_CHUNK_CHARS = 600;
 
 // Build the prompt sent to the TTS model. Gemini TTS takes style direction as
 // natural-language text, but a "vague" prompt occasionally makes it READ THE
