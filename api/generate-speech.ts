@@ -51,13 +51,17 @@ const WORDS_PER_SECOND = 2.5;
 const PREVIEW_SECONDS = 10;
 
 // Rate limit: generation is the expensive path, but a single long render now
-// fans out into one request per ~1000-char chunk (up to ~10 for a 10-min
-// script). Budget enough for a couple of long renders per minute per IP.
-const RATE_LIMIT = 60;
+// fans out into one request per ~400-char chunk (roughly 25-30 for a 10-min
+// script). Budget enough for a long render plus headroom per IP.
+const RATE_LIMIT = 120;
 const RATE_WINDOW_MS = 60_000;
 
-// Keep each TTS request short so the model can't accelerate over a long run.
-const MAX_CHUNK_CHARS = 1000;
+// Keep each TTS request SHORT for two reasons: (1) the model can't accelerate
+// over a long run (anti-drift), and (2) Gemini TTS latency is highly variable
+// and a ~1000-char chunk can occasionally exceed Vercel's 60s function ceiling.
+// ~400 chars is ~25-30s of audio, which renders well under 60s even when the
+// service is slow, so no single per-chunk invocation times out.
+const MAX_CHUNK_CHARS = 400;
 
 // Prepended to every chunk to hold a consistent tempo.
 const STEADY_PACE =
