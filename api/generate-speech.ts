@@ -29,7 +29,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Modality } from '@google/genai';
 import {
   MAX_TEXT_LENGTH,
-  preprocessText,
+  personaPrefix,
+  processTags,
   isValidVoice,
   isValidPersona,
 } from './_shared/voice.js';
@@ -85,21 +86,26 @@ function chunkText(text: string, maxLen = MAX_CHUNK_CHARS): string[] {
   return chunks.filter((c) => /[a-z0-9]/i.test(c));
 }
 
-// Synthesize a single chunk. withRetry handles thrown 429s; the TTS model also
-// intermittently returns a 200 with NO audio (especially under throttling), so
-// we additionally retry an empty result a few times with backoff before giving
-// up. Returns the base64 PCM (or undefined if it never produced audio) + tokens.
+// Synthesize a single chunk. The persona prefix MUST lead every chunk (not just
+// the first) or the accent is lost partway through a multi-chunk render. Order:
+// accent instruction -> steady-pace instruction -> the chunk text.
+// withRetry handles thrown 429s; the TTS model also intermittently returns a 200
+// with NO audio (especially under throttling), so we additionally retry an empty
+// result a few times with backoff before giving up. Returns the base64 PCM (or
+// undefined if it never produced audio) + tokens.
 async function synthesizeChunk(
   ai: ReturnType<typeof getGeminiClient>,
   chunk: string,
   voice: string,
+  accentPrefix: string,
 ): Promise<{ audio: string | undefined; tokens: number }> {
+  const prompt = accentPrefix + STEADY_PACE + chunk;
   const maxEmptyRetries = 3;
   for (let attempt = 0; attempt <= maxEmptyRetries; attempt++) {
     const response = await withRetry(() =>
       ai.models.generateContent({
         model: TTS_MODEL,
-        contents: [{ parts: [{ text: STEADY_PACE + chunk }] }],
+        contents: [{ parts: [{ text: prompt }] }],
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -180,7 +186,10 @@ export default async function handler(
     }
   }
 
-  const optimizedText = preprocessText(rawText, persona);
+  // Process tags ONCE on the whole script (persona-free), then chunk. The
+  // persona/accent prefix is applied per chunk at synthesis time so the accent
+  // persists across every chunk, not just the first.
+  const optimizedText = processTags(rawText);
   const chunks = chunkText(optimizedText);
   if (chunks.length === 0) {
     res.status(400).json({ error: 'EMPTY_TEXT' });
@@ -197,14 +206,16 @@ export default async function handler(
   }
   const targetChunks = scope === 'full' ? [chunks[requestedChunk]] : chunks;
 
-  // ---- Synthesize the target chunk(s) (steady pace), collect audio + usage --
+  // ---- Synthesize the target chunk(s) (accent + steady pace), collect audio --
+  // The accent prefix leads every chunk so the persona never resets mid-render.
+  const accentPrefix = personaPrefix(persona);
   try {
     const ai = getGeminiClient();
     const audioChunks: string[] = [];
     let totalTokens = 0;
 
     for (const chunk of targetChunks) {
-      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice);
+      const { audio, tokens } = await synthesizeChunk(ai, chunk, voice, accentPrefix);
       if (!audio) {
         res.status(502).json({ error: 'NO_AUDIO' });
         return;

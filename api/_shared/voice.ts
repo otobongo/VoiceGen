@@ -81,10 +81,13 @@ const SCOPED_TAGS: { tag: string; instruction: string }[] = [
 ];
 
 /**
- * Convert the bracket-tag markup the UI produces into natural-language
- * delivery instructions the TTS model understands, then prepend the persona.
+ * Convert the bracket-tag markup the UI produces into natural-language delivery
+ * instructions the TTS model understands. Does NOT add the persona prefix —
+ * that must be applied per chunk (see personaPrefix), because the persona/accent
+ * instruction has to lead EVERY synthesized chunk or the accent is lost after
+ * the first one.
  */
-export function preprocessText(text: string, persona: PersonaType): string {
+export function processTags(text: string): string {
   let processed = text.replace(/\r\n/g, '\n');
 
   for (const { tag, instruction } of SCOPED_TAGS) {
@@ -95,16 +98,28 @@ export function preprocessText(text: string, persona: PersonaType): string {
     );
   }
 
-  processed = processed
+  return processed
     .replace(/\[pause\]/gi, '\n')
     .replace(/\[break\]/gi, '\n\n')
     .replace(/\[short\]/gi, '... ')
     .replace(/\.\.\.(?!\s)/g, '... ')
     .replace(/ +/g, ' ')
     .trim();
+}
 
-  const prefix = PERSONA_PROMPTS[persona] ?? '';
-  return prefix + processed;
+/** The accent/style instruction for a persona (empty for "neutral"). */
+export function personaPrefix(persona: PersonaType): string {
+  return PERSONA_PROMPTS[persona] ?? '';
+}
+
+/**
+ * Convert tag markup to delivery instructions and prepend the persona. Kept for
+ * single-shot callers (e.g. the standalone TTS API). The chunked master path in
+ * generate-speech.ts instead processes tags once and prepends personaPrefix to
+ * EACH chunk so the accent persists across the whole render.
+ */
+export function preprocessText(text: string, persona: PersonaType): string {
+  return personaPrefix(persona) + processTags(text);
 }
 
 export function isValidVoice(v: unknown): v is VoiceName {
